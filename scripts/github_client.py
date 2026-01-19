@@ -6,11 +6,16 @@ import requests
 #alerts of a certain file, only critical issues, etc
 class GitHubClient:
     def __init__(self, owner: str, repo: str, token: str = None):
-        self.token = token or os.getenv("GH_TOKEN")
+        self._token = token
         self.owner = owner
         self.repo = repo
         self.codescan_url = f"https://api.github.com/repos/{owner}/{repo}/code-scanning/alerts"
         self.analyses_url = f"https://api.github.com/repos/{owner}/{repo}/code-scanning/analyses"
+
+    @property
+    def token(self) -> str:
+        """Fetch token on-demand to avoid storing it longer than necessary."""
+        return self._token or os.getenv("GH_TOKEN")
 
     # def get_repo_contents(self, owner: str, repo: str, path: str = ""):
     #     url = f"{self.base_url}/repos/{owner}/{repo}/contents/{path}"
