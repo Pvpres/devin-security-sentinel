@@ -17,24 +17,14 @@ class GitHubClient:
         """Fetch token on-demand to avoid storing it longer than necessary."""
         return self._token or os.getenv("GH_TOKEN")
 
-    # def get_repo_contents(self, owner: str, repo: str, path: str = ""):
-    #     url = f"{self.base_url}/repos/{owner}/{repo}/contents/{path}"
-    #     headers = {
-    #         "Authorization": f"Bearer {self.token}",
-    #         "Accept": "application/vnd.github.v3+json"
-    #     }
-    #     response = requests.get(url, headers=headers)
-    #     response.raise_for_status()
-    #     return response.json()
-
-    def get_active_alerts(self) -> dict:
+    def get_active_alerts(self, severity: list[str] = None) -> dict:
         headers = {"Accept": "application/vnd.github+json", "Authorization": f"Bearer {self.token}"}
-        params = {"state": "open"}
+        params = {"state": "open", "assignees" : "none"}
 
         response = requests.get(self.codescan_url, headers=headers, params=params)
 
         if response.status_code == 200:
-            return response.json()
+            alerts = response.json()
         else:
             print(f"Failed to fetch code scanning alerts: {response.status_code}")
             return {}
