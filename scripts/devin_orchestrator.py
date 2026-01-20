@@ -1051,6 +1051,8 @@ if __name__ == "__main__":
         print("  DEVIN_API_KEY - Devin AI API Key")
         sys.exit(1)
     
+    from dotenv import load_dotenv
+    load_dotenv()
     target_owner = sys.argv[1]
     target_repo = sys.argv[2]
     
