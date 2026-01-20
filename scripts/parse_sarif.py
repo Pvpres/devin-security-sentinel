@@ -258,6 +258,242 @@ def minify_sarif(raw_data: dict[str, Any]) -> list[dict[str, Any]]:
     return minified_results
 
 
+def _normalize_path(path: str | None) -> str:
+    """
+    Normalize file path for consistent matching between alerts and SARIF results.
+
+    Removes leading './' or '/' characters to ensure paths from different sources
+    can be compared reliably.
+
+    Args:
+        path: A file path string, or None.
+
+    Returns:
+        Normalized path string, or empty string if path is None.
+    """
+    if path is None:
+        return ""
+    return path.lstrip("./").lstrip("/")
+
+
+def build_active_alert_index(
+    alerts: list[dict[str, Any]]
+) -> dict[tuple[str, str, int], int]:
+    """
+    Build an index mapping (rule_id, file, line) to alert_number.
+
+    This function creates a lookup table from GitHub Code Scanning alerts that
+    enables efficient filtering of SARIF results to only those matching active
+    alerts. The composite key (rule_id, normalized_file, line) uniquely identifies
+    each vulnerability location.
+
+    Args:
+        alerts: List of alerts from GitHubClient.get_active_alerts(). Each alert
+                should contain 'number', 'rule.id', and 'most_recent_instance.location'.
+
+    Returns:
+        A dictionary mapping (rule_id, normalized_file, line) tuples to alert numbers.
+        This index can be passed to minify_sarif_state_aware() for filtering.
+
+    Example:
+        >>> alerts = [{"number": 1, "rule": {"id": "py/sql-injection"},
+        ...            "most_recent_instance": {"location": {"path": "app.py", "start_line": 42}}}]
+        >>> index = build_active_alert_index(alerts)
+        >>> print(index)
+        {('py/sql-injection', 'app.py', 42): 1}
+    """
+    index: dict[tuple[str, str, int], int] = {}
+
+    for alert in alerts:
+        alert_number = alert.get("number")
+        rule_id = alert.get("rule", {}).get("id")
+        instance = alert.get("most_recent_instance", {})
+        location = instance.get("location", {})
+        file_path = _normalize_path(location.get("path"))
+        line = location.get("start_line")
+
+        if all([alert_number is not None, rule_id, file_path, line is not None]):
+            key = (rule_id, file_path, line)
+            index[key] = alert_number
+
+    return index
+
+
+def minify_sarif_state_aware(
+    raw_data: dict[str, Any],
+    active_alert_index: dict[tuple[str, str, int], int]
+) -> list[dict[str, Any]]:
+    """
+    Extract essential fields from SARIF, filtering to only active alerts.
+
+    This function extends minify_sarif() by:
+    1. Only including results that match an active alert (via the index)
+    2. Adding the alert_number to each result for tracking and post-remediation updates
+
+    The state-aware approach ensures that only vulnerabilities that are:
+    - Currently open (not fixed or dismissed)
+    - Not assigned to another team member
+    are processed for remediation.
+
+    Args:
+        raw_data: Raw SARIF v2.1.0 data as a dictionary.
+        active_alert_index: Index from build_active_alert_index() mapping
+                           (rule_id, file, line) tuples to alert numbers.
+
+    Returns:
+        A list of minified result dictionaries, each containing:
+        - alert_number: The GitHub alert number for tracking
+        - ruleId: The identifier of the triggered rule
+        - message: The human-readable vulnerability description
+        - severity: The security-severity score (0.0-10.0 scale)
+        - target: Dict with 'file' and 'line' of the vulnerability location
+        - source: Location string of the taint source (format: "file:line")
+        - sink: Location string of the taint sink (format: "file:line")
+
+    Example:
+        >>> alerts = client.get_active_alerts()
+        >>> index = build_active_alert_index(alerts)
+        >>> sarif = client.get_sarif_data()
+        >>> minified = minify_sarif_state_aware(sarif, index)
+        >>> print(minified[0])
+        {
+            "alert_number": 1,
+            "ruleId": "py/sql-injection",
+            "message": "Query built from user input",
+            "severity": 9.8,
+            "target": {"file": "db.py", "line": 42},
+            "source": "api.py:10",
+            "sink": "db.py:42"
+        }
+    """
+    minified_results: list[dict[str, Any]] = []
+
+    runs = raw_data.get("runs", [])
+    if not runs:
+        return minified_results
+
+    rules_map = _build_rules_map(runs)
+
+    for run in runs:
+        results = run.get("results", [])
+
+        for result in results:
+            rule_id = result.get("ruleId")
+
+            target = None
+            locations = result.get("locations", [])
+            if locations:
+                target = _extract_physical_location(locations[0])
+
+            if target is None:
+                continue
+
+            file_path = _normalize_path(target.get("file"))
+            line = target.get("line")
+            key = (rule_id, file_path, line)
+
+            if key not in active_alert_index:
+                continue
+
+            alert_number = active_alert_index[key]
+
+            message = result.get("message", {})
+            message_text = message.get("text", "")
+            severity = _extract_severity(result, rules_map)
+            code_flows = result.get("codeFlows", [])
+            flow_endpoints = _extract_code_flow_endpoints(code_flows)
+
+            minified_result = {
+                "alert_number": alert_number,
+                "ruleId": rule_id,
+                "message": message_text,
+                "severity": severity,
+                "target": target,
+                "source": flow_endpoints["source"],
+                "sink": flow_endpoints["sink"]
+            }
+
+            minified_results.append(minified_result)
+
+    return minified_results
+
+
+def get_remediation_batches_state_aware(
+    minified_data: list[dict[str, Any]]
+) -> dict[str, dict[str, Any]]:
+    """
+    Create remediation batches with alert tracking from state-aware minified data.
+
+    This function processes minified SARIF data (from minify_sarif_state_aware)
+    to create remediation batches that include alert numbers for each task.
+    This enables post-remediation alert updates via the GitHub API.
+
+    Args:
+        minified_data: List of minified result dictionaries from minify_sarif_state_aware().
+                       Each dict should contain 'alert_number', 'ruleId', 'severity',
+                       'target', and 'source' fields.
+
+    Returns:
+        A dictionary where:
+        - Keys are ruleId strings (e.g., "py/sql-injection")
+        - Values are dictionaries containing:
+          - severity: The highest severity score among instances of this rule
+          - tasks: List of task dictionaries, each with:
+            - alert_number: The GitHub alert number for tracking
+            - file: Path to the vulnerable file
+            - line: Line number of the vulnerability
+            - source: Location string of the taint source
+
+    Example:
+        >>> minified = minify_sarif_state_aware(sarif, alert_index)
+        >>> batches = get_remediation_batches_state_aware(minified)
+        >>> print(batches)
+        {
+            "py/sql-injection": {
+                "severity": 9.8,
+                "tasks": [
+                    {"alert_number": 1, "file": "db.py", "line": 42, "source": "api.py:10"}
+                ]
+            }
+        }
+    """
+    SEVERITY_THRESHOLD = 7.0
+
+    batches: dict[str, dict[str, Any]] = {}
+
+    for item in minified_data:
+        severity = item.get("severity")
+        if severity is None or severity < SEVERITY_THRESHOLD:
+            continue
+
+        rule_id = item.get("ruleId")
+        if rule_id is None:
+            continue
+
+        target = item.get("target")
+        if target is None:
+            continue
+
+        task = {
+            "alert_number": item.get("alert_number"),
+            "file": target.get("file"),
+            "line": target.get("line"),
+            "source": item.get("source")
+        }
+
+        if rule_id not in batches:
+            batches[rule_id] = {
+                "severity": severity,
+                "tasks": []
+            }
+        elif severity > batches[rule_id]["severity"]:
+            batches[rule_id]["severity"] = severity
+
+        batches[rule_id]["tasks"].append(task)
+
+    return batches
+
+
 def get_remediation_batches(minified_data: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """
     Filter and batch high-severity vulnerabilities for remediation.
