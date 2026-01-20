@@ -20,6 +20,10 @@ from devin_orchestrator import (
     CLAIM_RETRY_DELAY_SECONDS
 )
 
+TEST_OWNER = 'pvpres'
+TEST_REPO = 'small_scale_security_tests'
+TEST_ALERT_NUMBERS = [1, 2]
+
 
 class TestGetBotUsername(unittest.TestCase):
     """Test _get_bot_username helper function."""
@@ -61,7 +65,7 @@ class TestClaimGitHubAlerts(unittest.TestCase):
         mock_response.status_code = 200
         mock_patch.return_value = mock_response
 
-        result = claim_github_alerts('owner', 'repo', [1])
+        result = claim_github_alerts(TEST_OWNER, TEST_REPO, [1])
 
         self.assertEqual(result, {1: True})
         mock_patch.assert_called_once()
@@ -80,7 +84,7 @@ class TestClaimGitHubAlerts(unittest.TestCase):
         mock_response.status_code = 200
         mock_patch.return_value = mock_response
 
-        result = claim_github_alerts('owner', 'repo', [1, 2, 3])
+        result = claim_github_alerts(TEST_OWNER, TEST_REPO, [1, 2, 3])
 
         self.assertEqual(result, {1: True, 2: True, 3: True})
         self.assertEqual(mock_patch.call_count, 3)
@@ -98,7 +102,7 @@ class TestClaimGitHubAlerts(unittest.TestCase):
         mock_response.text = 'Internal Server Error'
         mock_patch.return_value = mock_response
 
-        result = claim_github_alerts('owner', 'repo', [1], max_retries=3, retry_delay=0.1)
+        result = claim_github_alerts(TEST_OWNER, TEST_REPO, [1], max_retries=3, retry_delay=0.1)
 
         self.assertEqual(result, {1: False})
         self.assertEqual(mock_patch.call_count, 3)
@@ -121,7 +125,7 @@ class TestClaimGitHubAlerts(unittest.TestCase):
         
         mock_patch.side_effect = [fail_response, success_response]
 
-        result = claim_github_alerts('owner', 'repo', [1], max_retries=3, retry_delay=0.1)
+        result = claim_github_alerts(TEST_OWNER, TEST_REPO, [1], max_retries=3, retry_delay=0.1)
 
         self.assertEqual(result, {1: True})
         self.assertEqual(mock_patch.call_count, 2)
@@ -138,7 +142,7 @@ class TestClaimGitHubAlerts(unittest.TestCase):
         import requests
         mock_patch.side_effect = requests.RequestException('Connection error')
 
-        result = claim_github_alerts('owner', 'repo', [1], max_retries=2, retry_delay=0.1)
+        result = claim_github_alerts(TEST_OWNER, TEST_REPO, [1], max_retries=2, retry_delay=0.1)
 
         self.assertEqual(result, {1: False})
         self.assertEqual(mock_patch.call_count, 2)
@@ -151,7 +155,7 @@ class TestClaimGitHubAlerts(unittest.TestCase):
         mock_token.return_value = 'test-token'
         mock_username.return_value = 'test-bot'
 
-        result = claim_github_alerts('owner', 'repo', [])
+        result = claim_github_alerts(TEST_OWNER, TEST_REPO, [])
 
         self.assertEqual(result, {})
         mock_patch.assert_not_called()
@@ -184,7 +188,7 @@ class TestClaimGitHubAlerts(unittest.TestCase):
         mock_response.status_code = 200
         mock_patch.return_value = mock_response
 
-        claim_github_alerts('owner', 'repo', [1])
+        claim_github_alerts(TEST_OWNER, TEST_REPO, [1])
 
         call_args = mock_patch.call_args
         headers = call_args.kwargs['headers']
@@ -205,7 +209,7 @@ class TestUnclaimGitHubAlerts(unittest.TestCase):
         mock_response.status_code = 200
         mock_patch.return_value = mock_response
 
-        result = unclaim_github_alerts('owner', 'repo', [1])
+        result = unclaim_github_alerts(TEST_OWNER, TEST_REPO, [1])
 
         self.assertEqual(result, {1: True})
         mock_patch.assert_called_once()
@@ -222,7 +226,7 @@ class TestUnclaimGitHubAlerts(unittest.TestCase):
         mock_response.status_code = 200
         mock_patch.return_value = mock_response
 
-        result = unclaim_github_alerts('owner', 'repo', [1, 2, 3])
+        result = unclaim_github_alerts(TEST_OWNER, TEST_REPO, [1, 2, 3])
 
         self.assertEqual(result, {1: True, 2: True, 3: True})
         self.assertEqual(mock_patch.call_count, 3)
@@ -238,7 +242,7 @@ class TestUnclaimGitHubAlerts(unittest.TestCase):
         mock_response.text = 'Internal Server Error'
         mock_patch.return_value = mock_response
 
-        result = unclaim_github_alerts('owner', 'repo', [1], max_retries=3, retry_delay=0.1)
+        result = unclaim_github_alerts(TEST_OWNER, TEST_REPO, [1], max_retries=3, retry_delay=0.1)
 
         self.assertEqual(result, {1: False})
         self.assertEqual(mock_patch.call_count, 3)
@@ -259,7 +263,7 @@ class TestUnclaimGitHubAlerts(unittest.TestCase):
         
         mock_patch.side_effect = [fail_response, success_response]
 
-        result = unclaim_github_alerts('owner', 'repo', [1], max_retries=3, retry_delay=0.1)
+        result = unclaim_github_alerts(TEST_OWNER, TEST_REPO, [1], max_retries=3, retry_delay=0.1)
 
         self.assertEqual(result, {1: True})
         self.assertEqual(mock_patch.call_count, 2)
@@ -274,7 +278,7 @@ class TestUnclaimGitHubAlerts(unittest.TestCase):
         import requests
         mock_patch.side_effect = requests.RequestException('Connection error')
 
-        result = unclaim_github_alerts('owner', 'repo', [1], max_retries=2, retry_delay=0.1)
+        result = unclaim_github_alerts(TEST_OWNER, TEST_REPO, [1], max_retries=2, retry_delay=0.1)
 
         self.assertEqual(result, {1: False})
         self.assertEqual(mock_patch.call_count, 2)
@@ -285,7 +289,7 @@ class TestUnclaimGitHubAlerts(unittest.TestCase):
         """Verify unclaiming with empty alert list returns empty dict."""
         mock_token.return_value = 'test-token'
 
-        result = unclaim_github_alerts('owner', 'repo', [])
+        result = unclaim_github_alerts(TEST_OWNER, TEST_REPO, [])
 
         self.assertEqual(result, {})
         mock_patch.assert_not_called()
@@ -320,10 +324,10 @@ class TestClaimUnclaimIntegration(unittest.TestCase):
         mock_response.status_code = 200
         mock_patch.return_value = mock_response
 
-        claim_result = claim_github_alerts('owner', 'repo', [1, 2])
+        claim_result = claim_github_alerts(TEST_OWNER, TEST_REPO, TEST_ALERT_NUMBERS)
         self.assertEqual(claim_result, {1: True, 2: True})
 
-        unclaim_result = unclaim_github_alerts('owner', 'repo', [1, 2])
+        unclaim_result = unclaim_github_alerts(TEST_OWNER, TEST_REPO, TEST_ALERT_NUMBERS)
         self.assertEqual(unclaim_result, {1: True, 2: True})
 
         self.assertEqual(mock_patch.call_count, 4)
@@ -345,7 +349,7 @@ class TestClaimUnclaimIntegration(unittest.TestCase):
         
         mock_patch.side_effect = [success_response, fail_response, success_response]
 
-        result = claim_github_alerts('owner', 'repo', [1, 2, 3], max_retries=1, retry_delay=0.01)
+        result = claim_github_alerts(TEST_OWNER, TEST_REPO, [1, 2, 3], max_retries=1, retry_delay=0.01)
 
         self.assertEqual(result[1], True)
         self.assertEqual(result[2], False)
@@ -364,6 +368,104 @@ class TestConstants(unittest.TestCase):
         """Verify CLAIM_RETRY_DELAY_SECONDS constant is defined."""
         self.assertIsInstance(CLAIM_RETRY_DELAY_SECONDS, (int, float))
         self.assertGreater(CLAIM_RETRY_DELAY_SECONDS, 0)
+
+
+@unittest.skipUnless(
+    os.getenv('GH_TOKEN') and os.getenv('DEVIN_BOT_USERNAME'),
+    'Skipping real API tests: GH_TOKEN and DEVIN_BOT_USERNAME required'
+)
+class TestRealAPIIntegration(unittest.TestCase):
+    """
+    Real API integration tests for claim/unclaim functionality.
+    
+    These tests make actual API calls to GitHub to verify that alerts
+    in pvpres/small_scale_security_tests can be claimed and unclaimed.
+    
+    Prerequisites:
+    - GH_TOKEN environment variable must be set with a valid GitHub token
+    - DEVIN_BOT_USERNAME environment variable must be set with a valid GitHub username
+    - The bot user must have write access to the test repository
+    """
+
+    def test_claim_and_unclaim_real_alerts(self):
+        """
+        Verify that the 2 alerts in pvpres/small_scale_security_tests
+        can be claimed and subsequently unclaimed via the real GitHub API.
+        """
+        claim_result = claim_github_alerts(
+            TEST_OWNER, 
+            TEST_REPO, 
+            TEST_ALERT_NUMBERS,
+            max_retries=3,
+            retry_delay=1.0
+        )
+        
+        for alert_num in TEST_ALERT_NUMBERS:
+            self.assertTrue(
+                claim_result.get(alert_num, False),
+                f"Failed to claim alert #{alert_num}"
+            )
+        
+        unclaim_result = unclaim_github_alerts(
+            TEST_OWNER,
+            TEST_REPO,
+            TEST_ALERT_NUMBERS,
+            max_retries=3,
+            retry_delay=1.0
+        )
+        
+        for alert_num in TEST_ALERT_NUMBERS:
+            self.assertTrue(
+                unclaim_result.get(alert_num, False),
+                f"Failed to unclaim alert #{alert_num}"
+            )
+
+    def test_claim_single_alert_real_api(self):
+        """Verify claiming a single alert via real API."""
+        alert_num = TEST_ALERT_NUMBERS[0]
+        
+        claim_result = claim_github_alerts(
+            TEST_OWNER,
+            TEST_REPO,
+            [alert_num],
+            max_retries=3,
+            retry_delay=1.0
+        )
+        
+        self.assertTrue(
+            claim_result.get(alert_num, False),
+            f"Failed to claim alert #{alert_num}"
+        )
+        
+        unclaim_result = unclaim_github_alerts(
+            TEST_OWNER,
+            TEST_REPO,
+            [alert_num],
+            max_retries=3,
+            retry_delay=1.0
+        )
+        
+        self.assertTrue(
+            unclaim_result.get(alert_num, False),
+            f"Failed to unclaim alert #{alert_num}"
+        )
+
+    def test_unclaim_already_unclaimed_alert(self):
+        """Verify unclaiming an already unclaimed alert succeeds."""
+        alert_num = TEST_ALERT_NUMBERS[0]
+        
+        unclaim_result = unclaim_github_alerts(
+            TEST_OWNER,
+            TEST_REPO,
+            [alert_num],
+            max_retries=3,
+            retry_delay=1.0
+        )
+        
+        self.assertTrue(
+            unclaim_result.get(alert_num, False),
+            f"Failed to unclaim already unclaimed alert #{alert_num}"
+        )
 
 
 if __name__ == '__main__':
