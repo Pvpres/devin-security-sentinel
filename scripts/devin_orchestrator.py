@@ -26,7 +26,6 @@ from typing import Any
 from dataclasses import dataclass, field
 from enum import Enum
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
 import requests
 
 
@@ -1035,6 +1034,7 @@ def run_orchestrator(
 
 if __name__ == "__main__":
     import sys
+    from dotenv import load_dotenv
     
     if len(sys.argv) < 3:
         print("Usage: python devin_orchestrator.py <owner> <repo>")
@@ -1042,7 +1042,8 @@ if __name__ == "__main__":
         print("  GH_TOKEN - GitHub Personal Access Token")
         print("  DEVIN_API_KEY - Devin AI API Key")
         sys.exit(1)
-    
+    load_dotenv()
+    print()
     target_owner = sys.argv[1]
     target_repo = sys.argv[2]
     
