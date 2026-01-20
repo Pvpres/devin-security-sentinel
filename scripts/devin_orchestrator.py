@@ -174,111 +174,28 @@ def create_devin_prompt(
     return prompt
 
 
-def claim_github_alerts(
-    owner: str,
-    repo: str,
-    alert_numbers: list[int],
-    assignee: str | None = None
-) -> dict[int, bool]:
+def extract_alert_numbers(batch_data: dict[str, Any]) -> list[int]:
     """
-    Claim GitHub code scanning alerts by assigning them to the Sentinel bot/user.
+    Extract alert numbers from batch data.
     
-    Uses the GitHub REST API to update alert state:
-    PATCH /repos/{owner}/{repo}/code-scanning/alerts/{number}
+    The batch data from get_remediation_batches_state_aware() already contains
+    all alert numbers needed. This function extracts them without making any
+    API calls.
     
     Args:
-        owner: GitHub repository owner
-        repo: GitHub repository name
-        alert_numbers: List of alert numbers to claim
-        assignee: GitHub username to assign (defaults to authenticated user)
+        batch_data: Batch data containing tasks with alert_number fields
+                    Format: {severity: float, tasks: [{alert_number, file, line, source}]}
     
     Returns:
-        Dictionary mapping alert_number to success status (True/False)
+        List of alert numbers extracted from the batch data
     """
-    token = _get_github_token()
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {token}",
-        "X-GitHub-Api-Version": "2022-11-28"
-    }
-    
-    results: dict[int, bool] = {}
-    
-    for alert_number in alert_numbers:
-        url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/code-scanning/alerts/{alert_number}"
-        
-        try:
-            payload: dict[str, Any] = {
-                "state": "open"
-            }
-            
-            response = requests.patch(url, headers=headers, json=payload, timeout=30)
-            
-            if response.status_code == 200:
-                results[alert_number] = True
-                print(f"[Claim] Alert #{alert_number} claimed successfully")
-            else:
-                results[alert_number] = False
-                print(f"[Claim] Failed to claim alert #{alert_number}: {response.status_code} - {response.text}")
-        
-        except requests.RequestException as e:
-            results[alert_number] = False
-            print(f"[Claim] Error claiming alert #{alert_number}: {e}")
-        
-        time.sleep(0.5)
-    
-    return results
-
-
-def unclaim_github_alerts(
-    owner: str,
-    repo: str,
-    alert_numbers: list[int]
-) -> dict[int, bool]:
-    """
-    Unclaim GitHub code scanning alerts so they can be retried later.
-    
-    Args:
-        owner: GitHub repository owner
-        repo: GitHub repository name
-        alert_numbers: List of alert numbers to unclaim
-    
-    Returns:
-        Dictionary mapping alert_number to success status (True/False)
-    """
-    token = _get_github_token()
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {token}",
-        "X-GitHub-Api-Version": "2022-11-28"
-    }
-    
-    results: dict[int, bool] = {}
-    
-    for alert_number in alert_numbers:
-        url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/code-scanning/alerts/{alert_number}"
-        
-        try:
-            payload: dict[str, Any] = {
-                "state": "open"
-            }
-            
-            response = requests.patch(url, headers=headers, json=payload, timeout=30)
-            
-            if response.status_code == 200:
-                results[alert_number] = True
-                print(f"[Unclaim] Alert #{alert_number} unclaimed successfully")
-            else:
-                results[alert_number] = False
-                print(f"[Unclaim] Failed to unclaim alert #{alert_number}: {response.status_code}")
-        
-        except requests.RequestException as e:
-            results[alert_number] = False
-            print(f"[Unclaim] Error unclaiming alert #{alert_number}: {e}")
-        
-        time.sleep(0.5)
-    
-    return results
+    tasks = batch_data.get("tasks", [])
+    alert_numbers = [
+        task.get("alert_number") 
+        for task in tasks 
+        if task.get("alert_number") is not None
+    ]
+    return alert_numbers
 
 
 def close_github_alerts(
@@ -578,8 +495,7 @@ def handle_session_outcome(
             close_github_alerts(owner, repo, fixed, reason="used in tests")
         
         if unfixed:
-            print(f"[Outcome] Unclaiming {len(unfixed)} unfixed alerts for retry")
-            unclaim_github_alerts(owner, repo, unfixed)
+            print(f"[Outcome] {len(unfixed)} unfixed alerts remain for retry")
             result.unfixed_alerts = unfixed
     
     elif result.status in (SessionStatus.STUCK, SessionStatus.TIMEOUT):
@@ -600,14 +516,14 @@ def process_batch(
     Process a single remediation batch end-to-end.
     
     This function is executed by worker threads and handles:
-    1. Claiming alerts
+    1. Extracting alert numbers from batch data
     2. Starting a Devin session
     3. Polling for completion
     4. Handling the final outcome
     
     Args:
         batch_id: The vulnerability rule ID (batch identifier)
-        batch_data: Batch data containing severity and tasks
+        batch_data: Batch data containing severity and tasks with alert_number fields
         owner: GitHub repository owner
         repo: GitHub repository name
         state: Shared orchestrator state for tracking
@@ -619,31 +535,19 @@ def process_batch(
     
     tasks = batch_data.get("tasks", [])
     severity = batch_data.get("severity", 0)
-    alert_numbers = [task.get("alert_number") for task in tasks if task.get("alert_number")]
+    alert_numbers = extract_alert_numbers(batch_data)
     
     print(f"[Batch] Batch {batch_id}: {len(tasks)} tasks, severity {severity}, alerts: {alert_numbers}")
     
-    if alert_numbers:
-        print(f"[Batch] Claiming {len(alert_numbers)} alerts for batch {batch_id}")
-        claim_results = claim_github_alerts(owner, repo, alert_numbers)
-        
-        claimed = [num for num, success in claim_results.items() if success]
-        failed_claims = [num for num, success in claim_results.items() if not success]
-        
-        if failed_claims:
-            print(f"[Batch] Warning: Failed to claim alerts: {failed_claims}")
-        
-        if not claimed:
-            print(f"[Batch] Failed to claim any alerts for batch {batch_id}")
-            return SessionResult(
-                status=SessionStatus.FAILURE,
-                session_id="",
-                batch_id=batch_id,
-                alert_numbers=alert_numbers,
-                error_message="Failed to claim any alerts"
-            )
-        
-        alert_numbers = claimed
+    if not alert_numbers:
+        print(f"[Batch] No alerts found in batch {batch_id}")
+        return SessionResult(
+            status=SessionStatus.FAILURE,
+            session_id="",
+            batch_id=batch_id,
+            alert_numbers=[],
+            error_message="No alerts found in batch data"
+        )
     
     task_description = f"Fix {len(tasks)} security vulnerabilities of type '{batch_id}' with severity {severity}"
     
@@ -660,8 +564,6 @@ def process_batch(
     
     if not session_response:
         print(f"[Batch] Failed to create Devin session for batch {batch_id}")
-        if alert_numbers:
-            unclaim_github_alerts(owner, repo, alert_numbers)
         return SessionResult(
             status=SessionStatus.FAILURE,
             session_id="",
@@ -700,7 +602,7 @@ def dispatch_threads(
     enforcing a conservative max_workers limit to avoid API rate limits.
     
     Each thread:
-    1. Claims alerts for its batch
+    1. Extracts alert numbers from batch data
     2. Starts a Devin session
     3. Polls for completion
     4. Handles the final outcome
