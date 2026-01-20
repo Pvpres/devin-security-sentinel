@@ -603,13 +603,21 @@ def poll_session_status(
                 error_message=f"Session stagnated for {stagnation_time:.0f} seconds"
             )
         
+        pull_request = session_data.get("pull_request")
+        pr_url = pull_request.get("url") if pull_request else None
+        
+        if pr_url:
+            print(f"[Poll] Session {session_id} has PR: {pr_url} - marking as success")
+            return SessionResult(
+                status=SessionStatus.SUCCESS,
+                session_id=session_id,
+                batch_id="",
+                alert_numbers=[],
+                pr_url=pr_url
+            )
+        
         if status in ("finished", "completed", "success"):
             print(f"[Poll] Session {session_id} completed successfully")
-            
-            pr_url = None
-            if structured_output and isinstance(structured_output, dict):
-                pr_url = structured_output.get("pr_url") or structured_output.get("pull_request_url")
-            
             return SessionResult(
                 status=SessionStatus.SUCCESS,
                 session_id=session_id,
@@ -630,7 +638,7 @@ def poll_session_status(
             )
         
         if status == "blocked":
-            print(f"[Poll] Session {session_id} is blocked, treating as failure")
+            print(f"[Poll] Session {session_id} is blocked (no PR found), treating as failure")
             return SessionResult(
                 status=SessionStatus.FAILURE,
                 session_id=session_id,
