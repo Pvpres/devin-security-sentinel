@@ -530,45 +530,6 @@ def get_devin_session_status(session_id: str) -> dict[str, Any] | None:
         return None
 
 
-def _extract_pr_url(session_data: dict[str, Any]) -> str | None:
-    """
-    Extract PR URL from a Devin session response.
-    
-    The Devin API may return PR information in multiple locations:
-    - session_data["pull_request"]["url"]
-    - session_data["structured_output"]["pr_url"]
-    - session_data["structured_output"]["pull_request_url"]
-    
-    This function checks all possible locations and returns the first
-    valid PR URL found.
-    
-    Args:
-        session_data: The session response dictionary from Devin API
-    
-    Returns:
-        The PR URL string if found, None otherwise
-    """
-    if not session_data or not isinstance(session_data, dict):
-        return None
-    
-    pull_request = session_data.get("pull_request")
-    if pull_request and isinstance(pull_request, dict):
-        pr_url = pull_request.get("url")
-        if pr_url:
-            return pr_url
-    
-    structured_output = session_data.get("structured_output")
-    if structured_output and isinstance(structured_output, dict):
-        pr_url = structured_output.get("pr_url")
-        if pr_url:
-            return pr_url
-        pr_url = structured_output.get("pull_request_url")
-        if pr_url:
-            return pr_url
-    
-    return None
-
-
 def poll_session_status(
     session_id: str,
     poll_interval: int = POLL_INTERVAL_SECONDS,
@@ -642,7 +603,8 @@ def poll_session_status(
                 error_message=f"Session stagnated for {stagnation_time:.0f} seconds"
             )
         
-        pr_url = _extract_pr_url(session_data)
+        pull_request = session_data.get("pull_request")
+        pr_url = pull_request.get("url") if pull_request else None
         
         if pr_url:
             print(f"[Poll] Session {session_id} has PR: {pr_url} - marking as success")
