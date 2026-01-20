@@ -39,6 +39,9 @@ STAGNATION_THRESHOLD_SECONDS = 5 * 60
 
 MAX_WORKERS_DEFAULT = 3
 
+CLAIM_RETRY_ATTEMPTS = 3
+CLAIM_RETRY_DELAY_SECONDS = 2
+
 
 class SessionStatus(Enum):
     SUCCESS = "success"
@@ -96,6 +99,204 @@ def _get_devin_api_key() -> str:
     if not key:
         raise ValueError("DEVIN_API_KEY environment variable is not set")
     return key
+
+
+def _get_authenticated_user() -> str:
+    """
+    Get the username of the authenticated GitHub user (PAT owner).
+    
+    Makes a GET request to https://api.github.com/user to retrieve
+    the login (username) of the token owner.
+    
+    Returns:
+        The username string of the authenticated user
+    
+    Raises:
+        RuntimeError: If the API call fails or returns invalid data
+    """
+    token = _get_github_token()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28"
+    }
+    response = requests.get("https://api.github.com/user", headers=headers)
+    if response.status_code != 200:
+        raise RuntimeError(f"Failed to get authenticated user: HTTP {response.status_code}: {response.text[:100]}")
+    data = response.json()
+    if "login" not in data:
+        raise RuntimeError("Failed to get authenticated user: 'login' field not in response")
+    return data["login"]
+
+
+def _get_bot_username() -> str:
+    """
+    Get the bot username for claiming alerts.
+    
+    Returns the username from DEVIN_BOT_USERNAME environment variable if set,
+    otherwise falls back to the authenticated user (PAT owner).
+    
+    Returns:
+        The bot username string
+    
+    Raises:
+        RuntimeError: If fallback to authenticated user fails
+    """
+    username = os.getenv("DEVIN_BOT_USERNAME")
+    if username:
+        return username
+    # Fall back to the authenticated user (PAT owner)
+    return _get_authenticated_user()
+
+
+def claim_github_alerts(
+    owner: str,
+    repo: str,
+    alert_numbers: list[int],
+    max_retries: int = CLAIM_RETRY_ATTEMPTS,
+    retry_delay: float = CLAIM_RETRY_DELAY_SECONDS
+) -> dict[int, bool]:
+    """
+    Claim GitHub code scanning alerts by assigning them to the bot user.
+    
+    This prevents race conditions where multiple orchestrator instances
+    might try to fix the same alerts simultaneously. Alerts are assigned
+    to the bot user specified by DEVIN_BOT_USERNAME environment variable.
+    
+    Uses retry logic with exponential backoff for transient failures.
+    
+    Args:
+        owner: GitHub repository owner
+        repo: GitHub repository name
+        alert_numbers: List of alert numbers to claim
+        max_retries: Maximum number of retry attempts per alert (default: 3)
+        retry_delay: Base delay between retries in seconds (default: 2)
+    
+    Returns:
+        Dictionary mapping alert_number to success status (True/False)
+    """
+    token = _get_github_token()
+    bot_username = _get_bot_username()
+    
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+        "X-GitHub-Api-Version": "2022-11-28"
+    }
+    
+    results: dict[int, bool] = {}
+    
+    for alert_number in alert_numbers:
+        url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/code-scanning/alerts/{alert_number}"
+        
+        success = False
+        last_error = None
+        
+        for attempt in range(max_retries):
+            try:
+                payload = {
+                    "assignees": [bot_username]
+                }
+                
+                response = requests.patch(url, headers=headers, json=payload, timeout=30)
+                
+                if response.status_code == 200:
+                    success = True
+                    print(f"[Claim] Alert #{alert_number} claimed successfully by {bot_username}")
+                    break
+                else:
+                    last_error = f"HTTP {response.status_code}: {response.text[:100]}"
+                    print(f"[Claim] Attempt {attempt + 1}/{max_retries} failed for alert #{alert_number}: {last_error}")
+            
+            except requests.RequestException as e:
+                last_error = str(e)
+                print(f"[Claim] Attempt {attempt + 1}/{max_retries} error for alert #{alert_number}: {e}")
+            
+            if attempt < max_retries - 1:
+                delay = retry_delay * (2 ** attempt)
+                time.sleep(delay)
+        
+        results[alert_number] = success
+        if not success:
+            print(f"[Claim] Failed to claim alert #{alert_number} after {max_retries} attempts: {last_error}")
+        
+        time.sleep(0.5)
+    
+    return results
+
+
+def unclaim_github_alerts(
+    owner: str,
+    repo: str,
+    alert_numbers: list[int],
+    max_retries: int = CLAIM_RETRY_ATTEMPTS,
+    retry_delay: float = CLAIM_RETRY_DELAY_SECONDS
+) -> dict[int, bool]:
+    """
+    Unclaim GitHub code scanning alerts by removing all assignees.
+    
+    This releases alerts back to the pool so they can be picked up by
+    future orchestrator runs. Used when remediation fails or is partial.
+    
+    Uses retry logic with exponential backoff for transient failures.
+    
+    Args:
+        owner: GitHub repository owner
+        repo: GitHub repository name
+        alert_numbers: List of alert numbers to unclaim
+        max_retries: Maximum number of retry attempts per alert (default: 3)
+        retry_delay: Base delay between retries in seconds (default: 2)
+    
+    Returns:
+        Dictionary mapping alert_number to success status (True/False)
+    """
+    token = _get_github_token()
+    
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+        "X-GitHub-Api-Version": "2022-11-28"
+    }
+    
+    results: dict[int, bool] = {}
+    
+    for alert_number in alert_numbers:
+        url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/code-scanning/alerts/{alert_number}"
+        
+        success = False
+        last_error = None
+        
+        for attempt in range(max_retries):
+            try:
+                payload = {
+                    "assignees": []
+                }
+                
+                response = requests.patch(url, headers=headers, json=payload, timeout=30)
+                
+                if response.status_code == 200:
+                    success = True
+                    print(f"[Unclaim] Alert #{alert_number} unclaimed successfully")
+                    break
+                else:
+                    last_error = f"HTTP {response.status_code}: {response.text[:100]}"
+                    print(f"[Unclaim] Attempt {attempt + 1}/{max_retries} failed for alert #{alert_number}: {last_error}")
+            
+            except requests.RequestException as e:
+                last_error = str(e)
+                print(f"[Unclaim] Attempt {attempt + 1}/{max_retries} error for alert #{alert_number}: {e}")
+            
+            if attempt < max_retries - 1:
+                delay = retry_delay * (2 ** attempt)
+                time.sleep(delay)
+        
+        results[alert_number] = success
+        if not success:
+            print(f"[Unclaim] Failed to unclaim alert #{alert_number} after {max_retries} attempts: {last_error}")
+        
+        time.sleep(0.5)
+    
+    return results
 
 
 def create_devin_prompt(
@@ -452,9 +653,9 @@ def handle_session_outcome(
     
     Implements outcome reconciliation logic:
     - Success: Confirm PR creation, close all associated alerts
-    - Failure: Leave alerts claimed, log failure reason
+    - Failure: Unclaim all alerts so they can be retried
     - Partial Success: Close fixed alerts, unclaim unfixed alerts
-    - Stuck/Timeout: Leave alerts claimed for manual review
+    - Stuck/Timeout: Unclaim all alerts so they can be retried
     
     Args:
         result: The SessionResult from poll_session_status
@@ -483,7 +684,15 @@ def handle_session_outcome(
             print(f"[Outcome] Warning: Failed to close alerts: {result.unfixed_alerts}")
     
     elif result.status == SessionStatus.FAILURE:
-        print(f"[Outcome] Session failed, leaving {len(alert_numbers)} alerts claimed for review")
+        print(f"[Outcome] Session failed, unclaiming {len(alert_numbers)} alerts for retry")
+        unclaim_results = unclaim_github_alerts(owner, repo, alert_numbers)
+        
+        unclaimed = [num for num, success in unclaim_results.items() if success]
+        failed_unclaims = [num for num, success in unclaim_results.items() if not success]
+        
+        if failed_unclaims:
+            print(f"[Outcome] Warning: Failed to unclaim alerts: {failed_unclaims}")
+        
         result.unfixed_alerts = alert_numbers
     
     elif result.status == SessionStatus.PARTIAL:
@@ -495,11 +704,23 @@ def handle_session_outcome(
             close_github_alerts(owner, repo, fixed, reason="used in tests")
         
         if unfixed:
-            print(f"[Outcome] {len(unfixed)} unfixed alerts remain for retry")
+            print(f"[Outcome] Unclaiming {len(unfixed)} unfixed alerts for retry")
+            unclaim_results = unclaim_github_alerts(owner, repo, unfixed)
+            
+            failed_unclaims = [num for num, success in unclaim_results.items() if not success]
+            if failed_unclaims:
+                print(f"[Outcome] Warning: Failed to unclaim alerts: {failed_unclaims}")
+            
             result.unfixed_alerts = unfixed
     
     elif result.status in (SessionStatus.STUCK, SessionStatus.TIMEOUT):
-        print(f"[Outcome] Session {result.status.value}, leaving alerts claimed for manual review")
+        print(f"[Outcome] Session {result.status.value}, unclaiming {len(alert_numbers)} alerts for retry")
+        unclaim_results = unclaim_github_alerts(owner, repo, alert_numbers)
+        
+        failed_unclaims = [num for num, success in unclaim_results.items() if not success]
+        if failed_unclaims:
+            print(f"[Outcome] Warning: Failed to unclaim alerts: {failed_unclaims}")
+        
         result.unfixed_alerts = alert_numbers
     
     return result
@@ -548,6 +769,26 @@ def process_batch(
             alert_numbers=[],
             error_message="No alerts found in batch data"
         )
+    
+    print(f"[Batch] Claiming {len(alert_numbers)} alerts for batch {batch_id}")
+    claim_results = claim_github_alerts(owner, repo, alert_numbers)
+    
+    claimed_alerts = [num for num, success in claim_results.items() if success]
+    failed_claims = [num for num, success in claim_results.items() if not success]
+    
+    if not claimed_alerts:
+        print(f"[Batch] Failed to claim any alerts for batch {batch_id}, skipping")
+        return SessionResult(
+            status=SessionStatus.FAILURE,
+            session_id="",
+            batch_id=batch_id,
+            alert_numbers=alert_numbers,
+            error_message=f"Failed to claim alerts: {failed_claims}"
+        )
+    
+    if failed_claims:
+        print(f"[Batch] Warning: Could not claim alerts {failed_claims}, proceeding with {len(claimed_alerts)} claimed alerts")
+        alert_numbers = claimed_alerts
     
     task_description = f"Fix {len(tasks)} security vulnerabilities of type '{batch_id}' with severity {severity}"
     
