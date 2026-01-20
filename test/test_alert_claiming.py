@@ -16,6 +16,7 @@ from devin_orchestrator import (
     claim_github_alerts,
     unclaim_github_alerts,
     _get_bot_username,
+    _get_authenticated_user,
     CLAIM_RETRY_ATTEMPTS,
     CLAIM_RETRY_DELAY_SECONDS
 )
@@ -23,6 +24,55 @@ from devin_orchestrator import (
 TEST_OWNER = 'pvpres'
 TEST_REPO = 'small_scale_security_tests'
 TEST_ALERT_NUMBERS = [1, 2]
+
+
+class TestGetAuthenticatedUser(unittest.TestCase):
+    """Test _get_authenticated_user helper function."""
+
+    @patch('devin_orchestrator._get_github_token')
+    @patch('devin_orchestrator.requests.get')
+    def test_get_authenticated_user_success(self, mock_get, mock_token):
+        """Verify _get_authenticated_user returns the login from API response."""
+        mock_token.return_value = 'test-token'
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {'login': 'pat-owner-user'}
+        mock_get.return_value = mock_response
+
+        result = _get_authenticated_user()
+
+        self.assertEqual(result, 'pat-owner-user')
+        mock_get.assert_called_once()
+        call_args = mock_get.call_args
+        self.assertEqual(call_args.args[0], 'https://api.github.com/user')
+
+    @patch('devin_orchestrator._get_github_token')
+    @patch('devin_orchestrator.requests.get')
+    def test_get_authenticated_user_api_failure(self, mock_get, mock_token):
+        """Verify _get_authenticated_user raises RuntimeError on API failure."""
+        mock_token.return_value = 'test-token'
+        mock_response = MagicMock()
+        mock_response.status_code = 401
+        mock_response.text = 'Unauthorized'
+        mock_get.return_value = mock_response
+
+        with self.assertRaises(RuntimeError) as context:
+            _get_authenticated_user()
+        self.assertIn('401', str(context.exception))
+
+    @patch('devin_orchestrator._get_github_token')
+    @patch('devin_orchestrator.requests.get')
+    def test_get_authenticated_user_missing_login(self, mock_get, mock_token):
+        """Verify _get_authenticated_user raises RuntimeError when login field missing."""
+        mock_token.return_value = 'test-token'
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {'id': 12345}  # No 'login' field
+        mock_get.return_value = mock_response
+
+        with self.assertRaises(RuntimeError) as context:
+            _get_authenticated_user()
+        self.assertIn('login', str(context.exception))
 
 
 class TestGetBotUsername(unittest.TestCase):
@@ -34,21 +84,41 @@ class TestGetBotUsername(unittest.TestCase):
         result = _get_bot_username()
         self.assertEqual(result, 'test-bot')
 
+    @patch('devin_orchestrator._get_authenticated_user')
     @patch.dict(os.environ, {}, clear=True)
-    def test_get_bot_username_missing_raises_error(self):
-        """Verify _get_bot_username raises ValueError when env var is missing."""
+    def test_get_bot_username_fallback_to_authenticated_user(self, mock_auth_user):
+        """Verify _get_bot_username falls back to authenticated user when env var is missing."""
+        mock_auth_user.return_value = 'pat-owner-user'
         if 'DEVIN_BOT_USERNAME' in os.environ:
             del os.environ['DEVIN_BOT_USERNAME']
-        with self.assertRaises(ValueError) as context:
-            _get_bot_username()
-        self.assertIn('DEVIN_BOT_USERNAME', str(context.exception))
+        
+        result = _get_bot_username()
+        
+        self.assertEqual(result, 'pat-owner-user')
+        mock_auth_user.assert_called_once()
 
+    @patch('devin_orchestrator._get_authenticated_user')
     @patch.dict(os.environ, {'DEVIN_BOT_USERNAME': ''})
-    def test_get_bot_username_empty_raises_error(self):
-        """Verify _get_bot_username raises ValueError when env var is empty."""
-        with self.assertRaises(ValueError) as context:
+    def test_get_bot_username_empty_fallback_to_authenticated_user(self, mock_auth_user):
+        """Verify _get_bot_username falls back to authenticated user when env var is empty."""
+        mock_auth_user.return_value = 'pat-owner-user'
+        
+        result = _get_bot_username()
+        
+        self.assertEqual(result, 'pat-owner-user')
+        mock_auth_user.assert_called_once()
+
+    @patch('devin_orchestrator._get_authenticated_user')
+    @patch.dict(os.environ, {}, clear=True)
+    def test_get_bot_username_fallback_failure(self, mock_auth_user):
+        """Verify _get_bot_username raises RuntimeError when fallback fails."""
+        mock_auth_user.side_effect = RuntimeError('API failure')
+        if 'DEVIN_BOT_USERNAME' in os.environ:
+            del os.environ['DEVIN_BOT_USERNAME']
+        
+        with self.assertRaises(RuntimeError) as context:
             _get_bot_username()
-        self.assertIn('DEVIN_BOT_USERNAME', str(context.exception))
+        self.assertIn('API failure', str(context.exception))
 
 
 class TestClaimGitHubAlerts(unittest.TestCase):
@@ -371,8 +441,8 @@ class TestConstants(unittest.TestCase):
 
 
 @unittest.skipUnless(
-    os.getenv('GH_TOKEN') and os.getenv('DEVIN_BOT_USERNAME'),
-    'Skipping real API tests: GH_TOKEN and DEVIN_BOT_USERNAME required'
+    os.getenv('GH_TOKEN') and os.getenv('RUN_REAL_API_TESTS', '').lower() == 'true',
+    'Skipping real API tests: GH_TOKEN and RUN_REAL_API_TESTS=true required'
 )
 class TestRealAPIIntegration(unittest.TestCase):
     """
@@ -383,8 +453,10 @@ class TestRealAPIIntegration(unittest.TestCase):
     
     Prerequisites:
     - GH_TOKEN environment variable must be set with a valid GitHub token
-    - DEVIN_BOT_USERNAME environment variable must be set with a valid GitHub username
-    - The bot user must have write access to the test repository
+      (with security_events write permission)
+    - RUN_REAL_API_TESTS=true must be set to explicitly enable these tests
+    - DEVIN_BOT_USERNAME is optional - if not set, falls back to PAT owner
+    - The authenticated user must have write access to the test repository
     """
 
     def test_claim_and_unclaim_real_alerts(self):

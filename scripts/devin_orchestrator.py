@@ -101,23 +101,52 @@ def _get_devin_api_key() -> str:
     return key
 
 
+def _get_authenticated_user() -> str:
+    """
+    Get the username of the authenticated GitHub user (PAT owner).
+    
+    Makes a GET request to https://api.github.com/user to retrieve
+    the login (username) of the token owner.
+    
+    Returns:
+        The username string of the authenticated user
+    
+    Raises:
+        RuntimeError: If the API call fails or returns invalid data
+    """
+    token = _get_github_token()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28"
+    }
+    response = requests.get("https://api.github.com/user", headers=headers)
+    if response.status_code != 200:
+        raise RuntimeError(f"Failed to get authenticated user: HTTP {response.status_code}: {response.text[:100]}")
+    data = response.json()
+    if "login" not in data:
+        raise RuntimeError("Failed to get authenticated user: 'login' field not in response")
+    return data["login"]
+
+
 def _get_bot_username() -> str:
     """
     Get the bot username for claiming alerts.
     
-    Returns the username from DEVIN_BOT_USERNAME environment variable.
-    This should be a GitHub user with write access to the repository.
+    Returns the username from DEVIN_BOT_USERNAME environment variable if set,
+    otherwise falls back to the authenticated user (PAT owner).
     
     Returns:
         The bot username string
     
     Raises:
-        ValueError: If DEVIN_BOT_USERNAME is not set
+        RuntimeError: If fallback to authenticated user fails
     """
     username = os.getenv("DEVIN_BOT_USERNAME")
-    if not username:
-        raise ValueError("DEVIN_BOT_USERNAME environment variable is not set")
-    return username
+    if username:
+        return username
+    # Fall back to the authenticated user (PAT owner)
+    return _get_authenticated_user()
 
 
 def claim_github_alerts(
