@@ -98,67 +98,9 @@ def _get_devin_api_key() -> str:
     return key
 
 
-def _minify_sarif_for_prompt(sarif_data: dict[str, Any]) -> list[dict[str, Any]]:
-    """
-    Create a minimal representation of SARIF data for prompt inclusion.
-    
-    Extracts only file paths, line numbers, and relevant code flow information
-    to minimize token usage while preserving essential context.
-    """
-    minified = []
-    runs = sarif_data.get("runs", [])
-    
-    for run in runs:
-        results = run.get("results", [])
-        for result in results:
-            locations = result.get("locations", [])
-            target = None
-            if locations:
-                physical = locations[0].get("physicalLocation", {})
-                artifact = physical.get("artifactLocation", {})
-                region = physical.get("region", {})
-                if artifact.get("uri"):
-                    target = {
-                        "file": artifact.get("uri"),
-                        "line": region.get("startLine")
-                    }
-            
-            code_flows = result.get("codeFlows", [])
-            source = None
-            sink = None
-            if code_flows:
-                for cf in code_flows:
-                    thread_flows = cf.get("threadFlows", [])
-                    for tf in thread_flows:
-                        locs = tf.get("locations", [])
-                        if locs:
-                            first = locs[0].get("location", {}).get("physicalLocation", {})
-                            first_art = first.get("artifactLocation", {})
-                            first_reg = first.get("region", {})
-                            if first_art.get("uri") and source is None:
-                                source = f"{first_art.get('uri')}:{first_reg.get('startLine')}"
-                            
-                            last = locs[-1].get("location", {}).get("physicalLocation", {})
-                            last_art = last.get("artifactLocation", {})
-                            last_reg = last.get("region", {})
-                            if last_art.get("uri"):
-                                sink = f"{last_art.get('uri')}:{last_reg.get('startLine')}"
-            
-            if target:
-                minified.append({
-                    "rule": result.get("ruleId"),
-                    "file": target["file"],
-                    "line": target["line"],
-                    "source": source,
-                    "sink": sink
-                })
-    
-    return minified
-
-
 def create_devin_prompt(
     task_description: str,
-    sarif_data: dict[str, Any],
+    batch_data: dict[str, Any],
     batch_id: str,
     owner: str,
     repo: str
@@ -168,12 +110,13 @@ def create_devin_prompt(
     
     The prompt includes:
     - Task description with clear remediation instructions
-    - Minified SARIF data with file paths, line numbers, and code flows
+    - Minified batch data with file paths, line numbers, and code flows
     - Instructions to fix vulnerabilities, run tests, and open a PR
     
     Args:
         task_description: Human-readable description of the vulnerability batch
-        sarif_data: Raw or minified SARIF data for the batch
+        batch_data: Minified batch data from get_remediation_batches_state_aware()
+                    Format: {severity: float, tasks: [{alert_number, file, line, source}]}
         batch_id: Identifier for the vulnerability batch (typically the ruleId)
         owner: GitHub repository owner
         repo: GitHub repository name
@@ -181,23 +124,14 @@ def create_devin_prompt(
     Returns:
         XML-formatted prompt string optimized for Devin AI processing
     """
-    minified = _minify_sarif_for_prompt(sarif_data) if sarif_data.get("runs") else sarif_data
+    tasks = batch_data.get("tasks", [])
+    severity = batch_data.get("severity", 0)
     
     vulnerabilities_xml = ""
-    if isinstance(minified, list):
-        for vuln in minified:
-            vulnerabilities_xml += f"""
+    for task in tasks:
+        vulnerabilities_xml += f"""
     <vulnerability>
-      <rule>{vuln.get('rule', 'unknown')}</rule>
-      <file>{vuln.get('file', 'unknown')}</file>
-      <line>{vuln.get('line', 'unknown')}</line>
-      <source>{vuln.get('source', 'N/A')}</source>
-      <sink>{vuln.get('sink', 'N/A')}</sink>
-    </vulnerability>"""
-    elif isinstance(minified, dict) and "tasks" in minified:
-        for task in minified.get("tasks", []):
-            vulnerabilities_xml += f"""
-    <vulnerability>
+      <rule>{batch_id}</rule>
       <file>{task.get('file', 'unknown')}</file>
       <line>{task.get('line', 'unknown')}</line>
       <source>{task.get('source', 'N/A')}</source>
@@ -715,7 +649,7 @@ def process_batch(
     
     prompt = create_devin_prompt(
         task_description=task_description,
-        sarif_data=batch_data,
+        batch_data=batch_data,
         batch_id=batch_id,
         owner=owner,
         repo=repo
