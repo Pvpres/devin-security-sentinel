@@ -29,6 +29,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
+from scripts.termination_logic import (
+    send_sleep_message,
+    get_available_session_slots,
+)
+
 
 DEVIN_API_BASE = "https://api.devin.ai/v1"
 GITHUB_API_BASE = "https://api.github.com"
@@ -569,88 +574,6 @@ def list_devin_sessions(limit: int = 100) -> list[dict[str, Any]]:
         return []
 
 
-def terminate_devin_session(session_id: str) -> bool:
-    """
-    Terminate a Devin AI session.
-    
-    Once terminated, the session cannot be resumed. This frees up a session
-    slot for new sessions.
-    
-    Args:
-        session_id: The session ID to terminate
-    
-    Returns:
-        True if termination was successful, False otherwise
-    """
-    api_key = _get_devin_api_key()
-    url = f"{DEVIN_API_BASE}/sessions/{session_id}"
-    
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-    
-    try:
-        response = requests.delete(url, headers=headers, timeout=30)
-        
-        if response.status_code == 200:
-            print(f"[Devin] Session {session_id} terminated successfully")
-            return True
-        else:
-            print(f"[Devin] Failed to terminate session {session_id}: {response.status_code}")
-            return False
-    
-    except requests.RequestException as e:
-        print(f"[Devin] Error terminating session {session_id}: {e}")
-        return False
-
-
-def cleanup_inactive_sessions() -> int:
-    """
-    Terminate all inactive (non-working) Devin sessions.
-    
-    This function lists all sessions and terminates those that are not
-    actively working (e.g., finished, blocked, failed). This frees up
-    session slots for new sessions.
-    
-    Should be called once at the start of orchestration (pre-flight cleanup)
-    to avoid race conditions with concurrent threads.
-    
-    Returns:
-        Number of sessions terminated
-    """
-    sessions = list_devin_sessions()
-    
-    if not sessions:
-        print("[Cleanup] No sessions found")
-        return 0
-    
-    active_statuses = {"working", "running", "pending"}
-    inactive_sessions = [
-        s for s in sessions
-        if s.get("status_enum", s.get("status", "")).lower() not in active_statuses
-    ]
-    
-    if not inactive_sessions:
-        print("[Cleanup] No inactive sessions to terminate")
-        return 0
-    
-    print(f"[Cleanup] Found {len(inactive_sessions)} inactive sessions to terminate")
-    
-    terminated_count = 0
-    for session in inactive_sessions:
-        session_id = session.get("session_id", "")
-        status = session.get("status_enum", session.get("status", "unknown"))
-        
-        if session_id and terminate_devin_session(session_id):
-            terminated_count += 1
-            print(f"[Cleanup] Terminated session {session_id} (was: {status})")
-        
-        time.sleep(0.5)
-    
-    print(f"[Cleanup] Terminated {terminated_count} inactive sessions")
-    return terminated_count
-
 
 def get_active_session_count() -> int:
     """
@@ -991,8 +914,8 @@ def process_batch(
     
     finally:
         if session_id:
-            print(f"[Batch] Terminating session {session_id} for batch {batch_id}")
-            terminate_devin_session(session_id)
+            print(f"[Batch] Sending sleep message to session {session_id} for batch {batch_id}")
+            send_sleep_message(session_id)
         
         if session_semaphore:
             session_semaphore.release()
@@ -1018,7 +941,7 @@ def dispatch_threads(
     2. Extracts alert numbers from batch data
     3. Starts a Devin session
     4. Polls for completion
-    5. Terminates the session to free the slot
+    5. Sends sleep message to session (preserves session for later review)
     6. Handles the final outcome
     
     Args:
@@ -1142,7 +1065,7 @@ def run_orchestrator(
     
     Coordinates the entire remediation workflow:
     1. Validates input batches and configuration
-    2. Performs pre-flight cleanup of inactive sessions
+    2. Checks available session capacity (without terminating existing sessions)
     3. Dispatches batches to parallel worker threads
     4. Monitors all sessions until completion
     5. Prints a human-readable summary
@@ -1204,20 +1127,17 @@ def run_orchestrator(
         print(f"\nConfiguration error: {e}")
         return []
     
-    print("\n[Pre-flight] Cleaning up inactive sessions from previous runs...")
-    terminated_count = cleanup_inactive_sessions()
-    
-    active_count = get_active_session_count()
-    available_slots = max(0, MAX_ACTIVE_SESSIONS - active_count)
+    print("\n[Pre-flight] Checking available session capacity...")
+    available_slots = get_available_session_slots()
     
     if available_slots == 0:
+        active_count = get_active_session_count()
         print(f"\n[Pre-flight] ERROR: No session slots available ({active_count}/{MAX_ACTIVE_SESSIONS} active)")
-        print("[Pre-flight] All sessions are currently active. Please wait for them to complete or terminate them manually.")
+        print("[Pre-flight] All sessions are currently active. Please wait for them to complete.")
+        print("[Pre-flight] To manually clean up sessions, use: from scripts.termination_logic import cleanup_sentinel_sessions")
         return []
     
     print(f"\n[Pre-flight] Session slots available: {available_slots}/{MAX_ACTIVE_SESSIONS}")
-    if terminated_count > 0:
-        print(f"[Pre-flight] Freed {terminated_count} slots by terminating inactive sessions")
     
     print("\nStarting remediation...")
     
