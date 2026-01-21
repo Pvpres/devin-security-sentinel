@@ -5,7 +5,7 @@ import time
 
 
 
-def main(owner:str, repo:str, branch:str = None, max_workers:int = 3):
+def main(owner:str, repo:str, branch:str = None, max_workers:int = 4):
     start = time.time()
     client = GitHubClient(owner, repo, branch=branch)
     alerts = client.get_active_alerts()

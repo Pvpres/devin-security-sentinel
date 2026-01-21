@@ -1,6 +1,7 @@
 import requests
 import os
 import time
+from .DO_config import get_github_token
 
 CLAIM_RETRY_ATTEMPTS = 3
 CLAIM_RETRY_DELAY_SECONDS = 2
@@ -15,11 +16,6 @@ To be used by the orchestrator, these functions should be imported from this mod
 - unclaim_github_alerts: Unclaims alerts by removing the bot user assignment
 - close_github_alerts: Closes alerts after successful remediation
 """
-def _get_github_token() -> str:
-    token = os.getenv("GH_TOKEN")
-    if not token:
-        raise ValueError("GH_TOKEN environment variable is not set")
-    return token
 
 def _get_bot_username() -> str:
     """
@@ -53,7 +49,7 @@ def _get_authenticated_user() -> str:
     Raises:
         RuntimeError: If the API call fails or returns invalid data
     """
-    token = _get_github_token()
+    token = get_github_token()
     headers = {
         "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github+json",
@@ -93,7 +89,7 @@ def claim_github_alerts(
     Returns:
         Dictionary mapping alert_number to success status (True/False)
     """
-    token = _get_github_token()
+    token = get_github_token()
     bot_username = _get_bot_username()
     
     headers = {
@@ -166,7 +162,7 @@ def unclaim_github_alerts(
     Returns:
         Dictionary mapping alert_number to success status (True/False)
     """
-    token = _get_github_token()
+    token = get_github_token()
     
     headers = {
         "Accept": "application/vnd.github+json",
@@ -232,7 +228,7 @@ def close_github_alerts(
     Returns:
         Dictionary mapping alert_number to success status (True/False)
     """
-    token = _get_github_token()
+    token = get_github_token()
     headers = {
         "Accept": "application/vnd.github+json",
         "Authorization": f"Bearer {token}",
