@@ -1,4 +1,7 @@
-
+"""
+Docstring for scripts.devin.DO_models
+Data structures for Devin AI Security Sentinel.
+"""
 from typing import Any
 from dataclasses import dataclass, field
 from enum import Enum
