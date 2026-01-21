@@ -580,3 +580,37 @@ def get_remediation_batches(minified_data: list[dict[str, Any]]) -> dict[str, di
         batches[rule_id]["tasks"].append(task)
 
     return batches
+
+def run_state_aware_parse(sarif_data: dict[str, Any], alerts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Runs the state-aware SARIF parser and batching engine.
+
+    This function coordinates the parsing of SARIF data with the filtering of results
+    to only include active alerts. It first builds an index of active alerts, then
+    applies the state-aware SARIF parser to filter out inactive alerts. Finally,
+    it batches the results by rule type and creates a dictionary of tasks for each rule.
+
+    Args:
+        sarif_data: Raw SARIF v2.1.0 data as a dictionary.
+        alerts: List of active alerts fetched from the GitHub /analyses endpoint.
+
+    Returns:
+        A list of dictionaries, each containing the tasks for a rule in the format:
+        {ruleId: {severity: float, tasks: [{alert_number, file, line, source}]}}
+    """
+    alert_index = build_active_alert_index(alerts)
+    minified = minify_sarif_state_aware(sarif_data, alert_index)
+    if not minified:
+        print(f"Minified to {len(minified)} results matching active alerts")
+        print("Probable error")
+        return {}
+    batches = get_remediation_batches_state_aware(minified)
+    if not batches:
+        print(f"Created {len(batches)} remediation batches")
+        print("Probable error")
+    return batches
+    
+    
+    
+    
+        

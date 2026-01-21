@@ -7,10 +7,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-client = GitHubClient('pvpres', 'small_scale_security_tests', token=os.getenv("GH_TEST_TOKEN"))
+print(os.getenv("GH_TOKEN"))
+client = GitHubClient('pvpres', 'purposeful_errors', token=os.getenv("GH_TOKEN"))
 alerts = client.get_active_alerts()
 print("Alerts:", alerts)
 print("Keys", alerts[0].keys())
 
 
-print("Analysis ID:", client.get_analysis_id())
+print("Analysis ID:", client.get_latest_analysis())
