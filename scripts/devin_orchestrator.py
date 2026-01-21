@@ -42,6 +42,8 @@ MAX_WORKERS_DEFAULT = 3
 CLAIM_RETRY_ATTEMPTS = 3
 CLAIM_RETRY_DELAY_SECONDS = 2
 
+MAX_ACTIVE_SESSIONS = 5
+
 
 class SessionStatus(Enum):
     SUCCESS = "success"
@@ -530,6 +532,145 @@ def get_devin_session_status(session_id: str) -> dict[str, Any] | None:
         return None
 
 
+def list_devin_sessions(limit: int = 100) -> list[dict[str, Any]]:
+    """
+    List all Devin AI sessions for the organization.
+    
+    Args:
+        limit: Maximum number of sessions to return (default: 100)
+    
+    Returns:
+        List of session dictionaries, or empty list on failure
+    """
+    api_key = _get_devin_api_key()
+    url = f"{DEVIN_API_BASE}/sessions"
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    
+    params = {"limit": limit}
+    
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            sessions = data.get("sessions", [])
+            print(f"[Devin] Listed {len(sessions)} sessions")
+            return sessions
+        else:
+            print(f"[Devin] Failed to list sessions: {response.status_code}")
+            return []
+    
+    except requests.RequestException as e:
+        print(f"[Devin] Error listing sessions: {e}")
+        return []
+
+
+def terminate_devin_session(session_id: str) -> bool:
+    """
+    Terminate a Devin AI session.
+    
+    Once terminated, the session cannot be resumed. This frees up a session
+    slot for new sessions.
+    
+    Args:
+        session_id: The session ID to terminate
+    
+    Returns:
+        True if termination was successful, False otherwise
+    """
+    api_key = _get_devin_api_key()
+    url = f"{DEVIN_API_BASE}/sessions/{session_id}"
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    
+    try:
+        response = requests.delete(url, headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            print(f"[Devin] Session {session_id} terminated successfully")
+            return True
+        else:
+            print(f"[Devin] Failed to terminate session {session_id}: {response.status_code}")
+            return False
+    
+    except requests.RequestException as e:
+        print(f"[Devin] Error terminating session {session_id}: {e}")
+        return False
+
+
+def cleanup_inactive_sessions() -> int:
+    """
+    Terminate all inactive (non-working) Devin sessions.
+    
+    This function lists all sessions and terminates those that are not
+    actively working (e.g., finished, blocked, failed). This frees up
+    session slots for new sessions.
+    
+    Should be called once at the start of orchestration (pre-flight cleanup)
+    to avoid race conditions with concurrent threads.
+    
+    Returns:
+        Number of sessions terminated
+    """
+    sessions = list_devin_sessions()
+    
+    if not sessions:
+        print("[Cleanup] No sessions found")
+        return 0
+    
+    active_statuses = {"working", "running", "pending"}
+    inactive_sessions = [
+        s for s in sessions
+        if s.get("status_enum", s.get("status", "")).lower() not in active_statuses
+    ]
+    
+    if not inactive_sessions:
+        print("[Cleanup] No inactive sessions to terminate")
+        return 0
+    
+    print(f"[Cleanup] Found {len(inactive_sessions)} inactive sessions to terminate")
+    
+    terminated_count = 0
+    for session in inactive_sessions:
+        session_id = session.get("session_id", "")
+        status = session.get("status_enum", session.get("status", "unknown"))
+        
+        if session_id and terminate_devin_session(session_id):
+            terminated_count += 1
+            print(f"[Cleanup] Terminated session {session_id} (was: {status})")
+        
+        time.sleep(0.5)
+    
+    print(f"[Cleanup] Terminated {terminated_count} inactive sessions")
+    return terminated_count
+
+
+def get_active_session_count() -> int:
+    """
+    Get the count of currently active Devin sessions.
+    
+    Returns:
+        Number of sessions with status 'working', 'running', or 'pending'
+    """
+    sessions = list_devin_sessions()
+    
+    active_statuses = {"working", "running", "pending"}
+    active_count = sum(
+        1 for s in sessions
+        if s.get("status_enum", s.get("status", "")).lower() in active_statuses
+    )
+    
+    print(f"[Devin] Active sessions: {active_count}/{MAX_ACTIVE_SESSIONS}")
+    return active_count
+
+
 def poll_session_status(
     session_id: str,
     poll_interval: int = POLL_INTERVAL_SECONDS,
@@ -739,16 +880,19 @@ def process_batch(
     batch_data: dict[str, Any],
     owner: str,
     repo: str,
-    state: OrchestratorState
+    state: OrchestratorState,
+    session_semaphore: threading.Semaphore | None = None
 ) -> SessionResult:
     """
     Process a single remediation batch end-to-end.
     
     This function is executed by worker threads and handles:
-    1. Extracting alert numbers from batch data
-    2. Starting a Devin session
-    3. Polling for completion
-    4. Handling the final outcome
+    1. Acquiring a session slot (via semaphore)
+    2. Extracting alert numbers from batch data
+    3. Starting a Devin session
+    4. Polling for completion
+    5. Terminating the session to free the slot
+    6. Handling the final outcome
     
     Args:
         batch_id: The vulnerability rule ID (batch identifier)
@@ -756,6 +900,7 @@ def process_batch(
         owner: GitHub repository owner
         repo: GitHub repository name
         state: Shared orchestrator state for tracking
+        session_semaphore: Optional semaphore to limit concurrent active sessions
     
     Returns:
         SessionResult with final status and details
@@ -808,59 +953,80 @@ def process_batch(
         repo=repo
     )
     
-    idempotency_key = f"sentinel-{owner}-{repo}-{batch_id}-{int(time.time())}"
-    session_response = create_devin_session(prompt, idempotency_key)
+    if session_semaphore:
+        print(f"[Batch] Waiting for session slot for batch {batch_id}...")
+        session_semaphore.acquire()
+        print(f"[Batch] Acquired session slot for batch {batch_id}")
     
-    if not session_response:
-        print(f"[Batch] Failed to create Devin session for batch {batch_id}")
-        return SessionResult(
-            status=SessionStatus.FAILURE,
-            session_id="",
-            batch_id=batch_id,
-            alert_numbers=alert_numbers,
-            error_message="Failed to create Devin session"
-        )
+    session_id = ""
+    try:
+        idempotency_key = f"sentinel-{owner}-{repo}-{batch_id}-{int(time.time())}"
+        session_response = create_devin_session(prompt, idempotency_key)
+        
+        if not session_response:
+            print(f"[Batch] Failed to create Devin session for batch {batch_id}")
+            return SessionResult(
+                status=SessionStatus.FAILURE,
+                session_id="",
+                batch_id=batch_id,
+                alert_numbers=alert_numbers,
+                error_message="Failed to create Devin session"
+            )
+        
+        session_id = session_response.get("session_id", "")
+        print(f"[Batch] Devin session created: {session_id} for batch {batch_id}")
+        
+        state.register_session(session_id, batch_id, alert_numbers)
+        
+        result = poll_session_status(session_id)
+        
+        result.batch_id = batch_id
+        result.alert_numbers = alert_numbers
+        
+        result = handle_session_outcome(result, owner, repo)
+        
+        state.add_result(result)
+        
+        return result
     
-    session_id = session_response.get("session_id", "")
-    print(f"[Batch] Devin session created: {session_id} for batch {batch_id}")
-    
-    state.register_session(session_id, batch_id, alert_numbers)
-    
-    result = poll_session_status(session_id)
-    
-    result.batch_id = batch_id
-    result.alert_numbers = alert_numbers
-    
-    result = handle_session_outcome(result, owner, repo)
-    
-    state.add_result(result)
-    
-    return result
+    finally:
+        if session_id:
+            print(f"[Batch] Terminating session {session_id} for batch {batch_id}")
+            terminate_devin_session(session_id)
+        
+        if session_semaphore:
+            session_semaphore.release()
+            print(f"[Batch] Released session slot for batch {batch_id}")
 
 
 def dispatch_threads(
     batches: dict[str, dict[str, Any]],
     owner: str,
     repo: str,
-    max_workers: int = MAX_WORKERS_DEFAULT
+    max_workers: int = MAX_WORKERS_DEFAULT,
+    available_session_slots: int = MAX_ACTIVE_SESSIONS
 ) -> list[SessionResult]:
     """
     Dispatch remediation batches to parallel worker threads.
     
     Uses ThreadPoolExecutor to process batches concurrently while
     enforcing a conservative max_workers limit to avoid API rate limits.
+    Uses a semaphore to limit concurrent active Devin sessions.
     
     Each thread:
-    1. Extracts alert numbers from batch data
-    2. Starts a Devin session
-    3. Polls for completion
-    4. Handles the final outcome
+    1. Acquires a session slot (via semaphore)
+    2. Extracts alert numbers from batch data
+    3. Starts a Devin session
+    4. Polls for completion
+    5. Terminates the session to free the slot
+    6. Handles the final outcome
     
     Args:
         batches: Dictionary of remediation batches {batch_id: batch_data}
         owner: GitHub repository owner
         repo: GitHub repository name
         max_workers: Maximum concurrent threads (default: 3)
+        available_session_slots: Number of available session slots (default: MAX_ACTIVE_SESSIONS)
     
     Returns:
         List of SessionResult objects for all processed batches
@@ -870,9 +1036,12 @@ def dispatch_threads(
         return []
     
     print(f"\n[Dispatch] Starting parallel processing of {len(batches)} batches with {max_workers} workers")
+    print(f"[Dispatch] Available session slots: {available_session_slots}")
     
     state = OrchestratorState()
     results: list[SessionResult] = []
+    
+    session_semaphore = threading.Semaphore(available_session_slots)
     
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_batch = {
@@ -882,7 +1051,8 @@ def dispatch_threads(
                 batch_data,
                 owner,
                 repo,
-                state
+                state,
+                session_semaphore
             ): batch_id
             for batch_id, batch_data in batches.items()
         }
@@ -972,9 +1142,10 @@ def run_orchestrator(
     
     Coordinates the entire remediation workflow:
     1. Validates input batches and configuration
-    2. Dispatches batches to parallel worker threads
-    3. Monitors all sessions until completion
-    4. Prints a human-readable summary
+    2. Performs pre-flight cleanup of inactive sessions
+    3. Dispatches batches to parallel worker threads
+    4. Monitors all sessions until completion
+    5. Prints a human-readable summary
     
     Args:
         batches: Dictionary of remediation batches from get_remediation_batches_state_aware()
@@ -1015,6 +1186,7 @@ def run_orchestrator(
     print(f"\nRepository: {owner}/{repo}")
     print(f"Batches to process: {len(batches)}")
     print(f"Max workers: {max_workers}")
+    print(f"Max active sessions: {MAX_ACTIVE_SESSIONS}")
     
     if not batches:
         print("\nNo batches to process. Exiting.")
@@ -1025,8 +1197,6 @@ def run_orchestrator(
         severity = batch_data.get("severity", 0)
         print(f"  - {batch_id}: {len(tasks)} tasks, severity {severity}")
     
-    print("\nStarting remediation...")
-    
     try:
         _get_github_token()
         _get_devin_api_key()
@@ -1034,7 +1204,24 @@ def run_orchestrator(
         print(f"\nConfiguration error: {e}")
         return []
     
-    results = dispatch_threads(batches, owner, repo, max_workers)
+    print("\n[Pre-flight] Cleaning up inactive sessions from previous runs...")
+    terminated_count = cleanup_inactive_sessions()
+    
+    active_count = get_active_session_count()
+    available_slots = max(0, MAX_ACTIVE_SESSIONS - active_count)
+    
+    if available_slots == 0:
+        print(f"\n[Pre-flight] ERROR: No session slots available ({active_count}/{MAX_ACTIVE_SESSIONS} active)")
+        print("[Pre-flight] All sessions are currently active. Please wait for them to complete or terminate them manually.")
+        return []
+    
+    print(f"\n[Pre-flight] Session slots available: {available_slots}/{MAX_ACTIVE_SESSIONS}")
+    if terminated_count > 0:
+        print(f"[Pre-flight] Freed {terminated_count} slots by terminating inactive sessions")
+    
+    print("\nStarting remediation...")
+    
+    results = dispatch_threads(batches, owner, repo, max_workers, available_slots)
     
     print_summary(results)
     
