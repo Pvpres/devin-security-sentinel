@@ -582,21 +582,24 @@ def get_remediation_batches(minified_data: list[dict[str, Any]]) -> dict[str, di
     return batches
 
 
-def extract_dominant_ref(alerts: list[dict[str, Any]]) -> str | None:
-    """
-    Extract the most common branch ref from a list of alerts.
+DEFAULT_REF = "refs/heads/main"
 
-    When alerts come from multiple branches, this function identifies the dominant
-    branch (the one with the most alerts) to ensure SARIF data is fetched from
-    the correct analysis context.
+
+def extract_dominant_ref(alerts: list[dict[str, Any]]) -> str:
+    """
+    Extract the branch ref to use for fetching SARIF data.
+
+    Defaults to "refs/heads/main" when no ref can be determined from alerts.
+    This ensures SARIF data is fetched from the default branch, which is where
+    most security alerts typically reside.
 
     Args:
         alerts: List of alerts from GitHubClient.get_active_alerts(). Each alert
                 should contain 'most_recent_instance.ref' indicating its branch.
 
     Returns:
-        The most common ref string (e.g., "refs/heads/main"), or None if no
-        valid refs are found in the alerts.
+        The ref string to use (defaults to "refs/heads/main" if no valid refs
+        are found in the alerts).
 
     Example:
         >>> alerts = [
@@ -606,9 +609,11 @@ def extract_dominant_ref(alerts: list[dict[str, Any]]) -> str | None:
         ... ]
         >>> extract_dominant_ref(alerts)
         'refs/heads/main'
+        >>> extract_dominant_ref([])
+        'refs/heads/main'
     """
     if not alerts:
-        return None
+        return DEFAULT_REF
 
     ref_counts: dict[str, int] = {}
     for alert in alerts:
@@ -618,7 +623,7 @@ def extract_dominant_ref(alerts: list[dict[str, Any]]) -> str | None:
             ref_counts[ref] = ref_counts.get(ref, 0) + 1
 
     if not ref_counts:
-        return None
+        return DEFAULT_REF
 
     dominant_ref = max(ref_counts, key=ref_counts.get)
     return dominant_ref
