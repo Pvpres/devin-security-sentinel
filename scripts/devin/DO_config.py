@@ -20,6 +20,12 @@ MAX_WORKERS_DEFAULT = 3
 CLAIM_RETRY_ATTEMPTS = 3
 CLAIM_RETRY_DELAY_SECONDS = 2
 
+# Active Session Management
+MAX_ACTIVE_SESSIONS = 5
+
+#Active sessions allowed by api
+MAX_ACTIVE_SESSIONS = 5
+
 
 def get_devin_api_key() -> str:
     """Get Devin API key from environment variable."""

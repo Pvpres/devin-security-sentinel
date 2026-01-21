@@ -1,6 +1,7 @@
 """Batch processing and parallel thread management."""
 
 import time
+import threading
 from typing import Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -9,7 +10,13 @@ from .DO_gh_alerts_control_center import claim_github_alerts
 from .DO_prompts import create_devin_prompt
 from .DO_session import create_devin_session, poll_session_status
 from .DO_outcomes import handle_session_outcome
-from .DO_config import MAX_WORKERS_DEFAULT
+from .DO_config import MAX_WORKERS_DEFAULT, MAX_ACTIVE_SESSIONS
+
+# Import from parent scripts directory
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from termination_logic import send_sleep_message
 
 def extract_alert_numbers(batch_data: dict[str, Any]) -> list[int]:
     """
@@ -39,16 +46,19 @@ def process_batch(
     batch_data: dict[str, Any],
     owner: str,
     repo: str,
-    state: OrchestratorState
+    state: OrchestratorState,
+    session_semaphore: threading.Semaphore | None = None
 ) -> SessionResult:
     """
     Process a single remediation batch end-to-end.
     
     This function is executed by worker threads and handles:
-    1. Extracting alert numbers from batch data
-    2. Starting a Devin session
-    3. Polling for completion
-    4. Handling the final outcome
+    1. Acquiring a session slot (via semaphore)
+    2. Extracting alert numbers from batch data
+    3. Starting a Devin session
+    4. Polling for completion
+    5. Terminating the session to free the slot
+    6. Handling the final outcome
     
     Args:
         batch_id: The vulnerability rule ID (batch identifier)
@@ -56,6 +66,7 @@ def process_batch(
         owner: GitHub repository owner
         repo: GitHub repository name
         state: Shared orchestrator state for tracking
+        session_semaphore: Optional semaphore to limit concurrent active sessions
     
     Returns:
         SessionResult with final status and details
@@ -108,59 +119,80 @@ def process_batch(
         repo=repo
     )
     
-    idempotency_key = f"sentinel-{owner}-{repo}-{batch_id}-{int(time.time())}"
-    session_response = create_devin_session(prompt, idempotency_key)
+    if session_semaphore:
+        print(f"[Batch] Waiting for session slot for batch {batch_id}...")
+        session_semaphore.acquire()
+        print(f"[Batch] Acquired session slot for batch {batch_id}")
     
-    if not session_response:
-        print(f"[Batch] Failed to create Devin session for batch {batch_id}")
-        return SessionResult(
-            status=SessionStatus.FAILURE,
-            session_id="",
-            batch_id=batch_id,
-            alert_numbers=alert_numbers,
-            error_message="Failed to create Devin session"
-        )
+    session_id = ""
+    try:
+        idempotency_key = f"sentinel-{owner}-{repo}-{batch_id}-{int(time.time())}"
+        session_response = create_devin_session(prompt, idempotency_key)
+        
+        if not session_response:
+            print(f"[Batch] Failed to create Devin session for batch {batch_id}")
+            return SessionResult(
+                status=SessionStatus.FAILURE,
+                session_id="",
+                batch_id=batch_id,
+                alert_numbers=alert_numbers,
+                error_message="Failed to create Devin session"
+            )
+        
+        session_id = session_response.get("session_id", "")
+        print(f"[Batch] Devin session created: {session_id} for batch {batch_id}")
+        
+        state.register_session(session_id, batch_id, alert_numbers)
+        
+        result = poll_session_status(session_id)
+        
+        result.batch_id = batch_id
+        result.alert_numbers = alert_numbers
+        
+        result = handle_session_outcome(result, owner, repo)
+        
+        state.add_result(result)
+        
+        return result
     
-    session_id = session_response.get("session_id", "")
-    print(f"[Batch] Devin session created: {session_id} for batch {batch_id}")
-    
-    state.register_session(session_id, batch_id, alert_numbers)
-    
-    result = poll_session_status(session_id)
-    
-    result.batch_id = batch_id
-    result.alert_numbers = alert_numbers
-    
-    result = handle_session_outcome(result, owner, repo)
-    
-    state.add_result(result)
-    
-    return result
+    finally:
+        if session_id:
+            print(f"[Batch] Sending sleep message to session {session_id} for batch {batch_id}")
+            send_sleep_message(session_id)
+        
+        if session_semaphore:
+            session_semaphore.release()
+            print(f"[Batch] Released session slot for batch {batch_id}")
 
 
 def dispatch_threads(
     batches: dict[str, dict[str, Any]],
     owner: str,
     repo: str,
-    max_workers: int = MAX_WORKERS_DEFAULT
+    max_workers: int = MAX_WORKERS_DEFAULT,
+    available_session_slots: int = MAX_ACTIVE_SESSIONS
 ) -> list[SessionResult]:
     """
     Dispatch remediation batches to parallel worker threads.
     
     Uses ThreadPoolExecutor to process batches concurrently while
     enforcing a conservative max_workers limit to avoid API rate limits.
+    Uses a semaphore to limit concurrent active Devin sessions.
     
     Each thread:
-    1. Extracts alert numbers from batch data
-    2. Starts a Devin session
-    3. Polls for completion
-    4. Handles the final outcome
+    1. Acquires a session slot (via semaphore)
+    2. Extracts alert numbers from batch data
+    3. Starts a Devin session
+    4. Polls for completion
+    5. Sends sleep message to session (preserves session for later review)
+    6. Handles the final outcome
     
     Args:
         batches: Dictionary of remediation batches {batch_id: batch_data}
         owner: GitHub repository owner
         repo: GitHub repository name
         max_workers: Maximum concurrent threads (default: 3)
+        available_session_slots: Number of available session slots (default: MAX_ACTIVE_SESSIONS)
     
     Returns:
         List of SessionResult objects for all processed batches
@@ -170,9 +202,12 @@ def dispatch_threads(
         return []
     
     print(f"\n[Dispatch] Starting parallel processing of {len(batches)} batches with {max_workers} workers")
+    print(f"[Dispatch] Available session slots: {available_session_slots}")
     
     state = OrchestratorState()
     results: list[SessionResult] = []
+    
+    session_semaphore = threading.Semaphore(available_session_slots)
     
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_batch = {
@@ -182,7 +217,8 @@ def dispatch_threads(
                 batch_data,
                 owner,
                 repo,
-                state
+                state,
+                session_semaphore
             ): batch_id
             for batch_id, batch_data in batches.items()
         }

@@ -11,6 +11,7 @@ from .DO_config import (
     SESSION_TIMEOUT_SECONDS,
     STAGNATION_THRESHOLD_SECONDS,
     get_devin_api_key,
+    MAX_ACTIVE_SESSIONS,
 )
 from .DO_models import SessionStatus, SessionResult
 
@@ -90,6 +91,62 @@ def get_devin_session_status(session_id: str) -> dict[str, Any] | None:
     except requests.RequestException as e:
         print(f"[Devin] Error getting session status: {e}")
         return None
+
+
+def list_devin_sessions(limit: int = 100) -> list[dict[str, Any]]:
+    """
+    List all Devin AI sessions for the organization.
+    
+    Args:
+        limit: Maximum number of sessions to return (default: 100)
+    
+    Returns:
+        List of session dictionaries, or empty list on failure
+    """
+    api_key = get_devin_api_key()
+    url = f"{DEVIN_API_BASE}/sessions"
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    
+    params = {"limit": limit}
+    
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            sessions = data.get("sessions", [])
+            print(f"[Devin] Listed {len(sessions)} sessions")
+            return sessions
+        else:
+            print(f"[Devin] Failed to list sessions: {response.status_code}")
+            return []
+    
+    except requests.RequestException as e:
+        print(f"[Devin] Error listing sessions: {e}")
+        return []
+
+
+def get_active_session_count() -> int:
+    """
+    Get the count of currently active Devin sessions.
+    
+    Returns:
+        Number of sessions with status 'working', 'running', or 'pending'
+    """
+    sessions = list_devin_sessions()
+    
+    active_statuses = {"working", "running", "pending"}
+    active_count = sum(
+        1 for s in sessions
+        if s.get("status_enum", s.get("status", "")).lower() in active_statuses
+    )
+    
+    print(f"[Devin] Active sessions: {active_count}/{MAX_ACTIVE_SESSIONS}")
+    return active_count
 
 
 def poll_session_status(

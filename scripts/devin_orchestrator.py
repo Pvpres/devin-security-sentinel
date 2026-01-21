@@ -1,22 +1,50 @@
 """
 Security Sentinel Orchestrator for Devin AI.
 
-Main entry point for the orchestrator. Coordinates the entire remediation workflow:
-1. Validates input batches and configuration
-2. Dispatches batches to parallel worker threads
-3. Monitors all sessions until completion
-4. Prints a human-readable summary
+This module is the main entry point for the Security Sentinel system.
+It coordinates the entire remediation workflow by importing and orchestrating
+functions from the devin module components:
+
+- devin.DO_config: Configuration constants
+- devin.DO_models: Data structures (SessionStatus, SessionResult, OrchestratorState)
+- devin.DO_session: Devin session lifecycle management
+- devin.DO_batch_processor: Batch processing and thread dispatch
+- devin.DO_outcomes: Session outcome reconciliation
+- devin.DO_reporting: Summary reporting
+- devin.DO_gh_alerts_control_center: GitHub alert management
+- devin.DO_prompts: Prompt generation
+
+The orchestrator acts as a thin coordination layer that brings together
+all these components into a cohesive workflow.
 """
 
 import os
-import sys
 from typing import Any
-from dotenv import load_dotenv
 
-from scripts.devin.DO_models import SessionResult
-from scripts.devin.DO_batch_processor import dispatch_threads
-from scripts.devin.DO_reporting import print_summary
-from scripts.devin.DO_config import MAX_WORKERS_DEFAULT, get_devin_api_key
+# Import all models and configuration from devin module
+from scripts.devin.DO_config import (
+    MAX_WORKERS_DEFAULT,
+    MAX_ACTIVE_SESSIONS,
+    get_github_token as _get_github_token,
+    get_devin_api_key as _get_devin_api_key,
+)
+from scripts.devin.DO_models import (
+    SessionStatus,
+    SessionResult,
+    OrchestratorState,
+)
+from scripts.devin.DO_session import (
+    get_active_session_count,
+)
+from scripts.devin.DO_batch_processor import (
+    dispatch_threads,
+)
+from scripts.devin.DO_reporting import (
+    print_summary,
+)
+from scripts.termination_logic import (
+    get_available_session_slots,
+)
 
 
 def run_orchestrator(
@@ -46,8 +74,8 @@ def run_orchestrator(
         List of SessionResult objects for all processed batches
     
     Example:
-        >>> from github_client import GitHubClient
-        >>> from parse_sarif import (
+        >>> from scripts.github_client import GitHubClient
+        >>> from scripts.parse_sarif import (
         ...     build_active_alert_index,
         ...     minify_sarif_state_aware,
         ...     get_remediation_batches_state_aware
@@ -86,7 +114,8 @@ def run_orchestrator(
         print(f"  - {batch_id}: {len(tasks)} tasks, severity {severity}")
     
     try:
-        get_devin_api_key()
+        _get_github_token()
+        _get_devin_api_key()
     except ValueError as e:
         print(f"\nConfiguration error: {e}")
         return []
@@ -113,6 +142,8 @@ def run_orchestrator(
 
 
 if __name__ == "__main__":
+    import sys
+    
     if len(sys.argv) < 3:
         print("Usage: python devin_orchestrator.py <owner> <repo>")
         print("\nThis script requires the following environment variables:")
@@ -120,6 +151,7 @@ if __name__ == "__main__":
         print("  DEVIN_API_KEY - Devin AI API Key")
         sys.exit(1)
     
+    from dotenv import load_dotenv
     load_dotenv()
     target_owner = sys.argv[1]
     target_repo = sys.argv[2]
