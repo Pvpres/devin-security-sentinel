@@ -1,0 +1,48 @@
+name: "Devin Security Sentinel Example"
+description: "For using the Devin Security Sentinel GitHub Action to remediate security alerts
+this is a sample format you can put in your .github/workflows/ directory to run the action"
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  run-devin-orchestrator:
+    name: "Run Devin Security Remediation"
+    runs-on: ubuntu-latest
+
+    steps:
+      # Always required so your action can access the repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # OPTIONAL: Run CodeQL first if users want fresh SARIF data
+      # They can remove this block if they already have alerts in GitHub Security
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+
+      # Your action
+      - name: Run Devin Security Orchestrator
+        uses: Pvpres/my-security-tool@v1
+        with:
+          # Required inputs
+          owner: ${{ github.repository_owner }}
+          repo: ${{ github.event.repository.name }}
+
+          # Optional branch (defaults to the branch that triggered the workflow)
+          branch: ${{ github.ref_name }}
+
+          # Required secrets
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          devin_api_key: ${{ secrets.DEVIN_API_KEY }}
+
+          # Optional: if your action supports it
+          # max_workers: 4

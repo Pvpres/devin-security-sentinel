@@ -1,0 +1,48 @@
+name: "Devin Security Sentinel"
+description: "Runs Devin-based remediation on active GitHub security alerts in a given repo"
+
+inputs:
+  owner:
+    description: "Repository owner"
+    required: true
+
+  repo:
+    description: "Repository name"
+    required: true
+
+  branch:
+    description: "Branch to analyze (optional)"
+    required: false
+    default: ""
+
+  github_token:
+    description: "GitHub Personal Access Token (classic required with full repo scope)"
+    required: true
+
+  devin_api_key:
+    description: "Devin API key"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        pip install -r "${{ github.action_path }}/requirements.txt"
+
+    - name: Run Devin Orchestrator
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        DEVIN_API_KEY: ${{ inputs.devin_api_key }}
+      run: |
+        python "${{ github.action_path }}/main.py" \
+          "${{ inputs.owner }}" \
+          "${{ inputs.repo }}" \
+          "${{ inputs.branch }}"

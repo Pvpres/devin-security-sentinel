@@ -24,7 +24,10 @@ class GitHubClient:
     @property
     def token(self) -> str:
         """Fetch token on-demand to avoid storing it longer than necessary."""
-        return self._token or os.getenv("GH_TOKEN")
+        token_value = self._token or os.getenv("GH_TOKEN")
+        if not token_value:
+            raise ValueError("GH_TOKEN environment variable is not set and no token was provided")
+        return token_value
 
     #add severity filer later
     def get_active_alerts(self, severity: list[str] = None) -> dict:
@@ -114,5 +117,5 @@ class GitHubClient:
             return response.json().get("default_branch")
         else:
             print(f"Failed to fetch repository info: {response.status_code}")
-            return "none"
+            raise ValueError("Could not determine default branch")
         
