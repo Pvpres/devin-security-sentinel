@@ -30,9 +30,10 @@ def run_orchestrator(
     
     Coordinates the entire remediation workflow:
     1. Validates input batches and configuration
-    2. Dispatches batches to parallel worker threads
-    3. Monitors all sessions until completion
-    4. Prints a human-readable summary
+    2. Checks available session capacity (without terminating existing sessions)
+    3. Dispatches batches to parallel worker threads
+    4. Monitors all sessions until completion
+    5. Prints a human-readable summary
     
     Args:
         batches: Dictionary of remediation batches from get_remediation_batches_state_aware()
@@ -73,6 +74,7 @@ def run_orchestrator(
     print(f"\nRepository: {owner}/{repo}")
     print(f"Batches to process: {len(batches)}")
     print(f"Max workers: {max_workers}")
+    print(f"Max active sessions: {MAX_ACTIVE_SESSIONS}")
     
     if not batches:
         print("\nNo batches to process. Exiting.")
@@ -83,15 +85,27 @@ def run_orchestrator(
         severity = batch_data.get("severity", 0)
         print(f"  - {batch_id}: {len(tasks)} tasks, severity {severity}")
     
-    print("\nStarting remediation...")
-    
     try:
         get_devin_api_key()
     except ValueError as e:
         print(f"\nConfiguration error: {e}")
         return []
     
-    results = dispatch_threads(batches, owner, repo, max_workers)
+    print("\n[Pre-flight] Checking available session capacity...")
+    available_slots = get_available_session_slots()
+    
+    if available_slots == 0:
+        active_count = get_active_session_count()
+        print(f"\n[Pre-flight] ERROR: No session slots available ({active_count}/{MAX_ACTIVE_SESSIONS} active)")
+        print("[Pre-flight] All sessions are currently active. Please wait for them to complete.")
+        print("[Pre-flight] To manually clean up sessions, use: from scripts.termination_logic import cleanup_sentinel_sessions")
+        return []
+    
+    print(f"\n[Pre-flight] Session slots available: {available_slots}/{MAX_ACTIVE_SESSIONS}")
+    
+    print("\nStarting remediation...")
+    
+    results = dispatch_threads(batches, owner, repo, max_workers, available_slots)
     
     print_summary(results)
     
