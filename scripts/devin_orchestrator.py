@@ -25,8 +25,8 @@ from typing import Any
 from scripts.devin.DO_config import (
     MAX_WORKERS_DEFAULT,
     MAX_ACTIVE_SESSIONS,
-    get_github_token as _get_github_token,
-    get_devin_api_key as _get_devin_api_key,
+    get_github_token,
+    get_devin_api_key,
 )
 from scripts.devin.DO_models import (
     SessionStatus,
@@ -114,8 +114,8 @@ def run_orchestrator(
         print(f"  - {batch_id}: {len(tasks)} tasks, severity {severity}")
     
     try:
-        _get_github_token()
-        _get_devin_api_key()
+        get_github_token()
+        get_devin_api_key()
     except ValueError as e:
         print(f"\nConfiguration error: {e}")
         return []

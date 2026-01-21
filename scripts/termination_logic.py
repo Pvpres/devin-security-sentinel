@@ -44,7 +44,7 @@ def _get_devin_api_key() -> str:
 
 def send_sleep_message(
     session_id: str,
-    message: str = "Please pause and wait for further instructions. This session has completed its assigned security remediation task."
+    message: str = "sleep"
 ) -> bool:
     """
     Send a sleep/pause message to a Devin AI session.
