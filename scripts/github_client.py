@@ -5,7 +5,7 @@ import requests
 #add functionality in alerts later so user can edit yaml file if thet only want
 #alerts of a certain file, only critical issues, etc
 class GitHubClient:
-    def __init__(self, owner: str, repo: str, token: str = None):
+    def __init__(self, owner: str, repo: str, token: str = None, branch: str = None):
         """
         Initialize the GitHub client with the given owner and repository.
 
@@ -19,6 +19,7 @@ class GitHubClient:
         self.repo = repo
         self.codescan_url = f"https://api.github.com/repos/{owner}/{repo}/code-scanning/alerts"
         self.analyses_url = f"https://api.github.com/repos/{owner}/{repo}/code-scanning/analyses"
+        self.branch = branch if branch is not None else self._get_default_branch()
 
     @property
     def token(self) -> str:
@@ -38,7 +39,8 @@ class GitHubClient:
         """
         headers = {"Accept": "application/vnd.github+json", "Authorization": f"Bearer {self.token}"}
         #only get alerts not already assigned to someone in the organization
-        params = {"state": "open", "assignees" : "none"}
+        
+        params = {"state": "open", "assignees" : "none", "ref": self.branch, "per_page": 100}
 
         response = requests.get(self.codescan_url, headers=headers, params=params)
         if response.status_code == 200:
@@ -51,7 +53,7 @@ class GitHubClient:
             print(f"Failed to fetch code scanning alerts: {response.status_code}")
             return {}
 
-    def get_latest_analysis(self) -> dict:
+    def _get_latest_analysis_id(self) -> dict:
         """
         Fetches the analysis ID for the given repository owner and name.
 
@@ -62,14 +64,13 @@ class GitHubClient:
         """
         
         headers = {"Accept": "application/vnd.github+json", "Authorization": f"Bearer {self.token}"}
-
-        response = requests.get(self.analyses_url, headers=headers)
+        params = {"ref": self.branch, "per_page": 1}
+        response = requests.get(self.analyses_url, headers=headers, params=params)
         if response.status_code == 200:
             analyses = response.json()
-            
             if analyses:
                 #the most recent analysis is the first in the list
-                return analyses[0]
+                return analyses[0].get("id", "")
             else:
                 print("No analyses found.")
                 return {}
@@ -86,13 +87,10 @@ class GitHubClient:
         :return: A dictionary containing the SARIF data.
         :rtype: dict
         """
-        analysis = self.get_latest_analysis()
-        if not analysis:
-            return {}
-        
-        id = analysis.get("id", "")
+        id = self._get_latest_analysis_id()
         if not id:
             return {}
+        
         sarif_url = f"{self.analyses_url}/{id}"
         headers = {"Accept": "application/sarif+json", "Authorization": f"Bearer {self.token}"}
         response = requests.get(sarif_url, headers=headers)
@@ -101,4 +99,20 @@ class GitHubClient:
         else:
             print(f"Failed to fetch SARIF data: {response.status_code}")
             return {}
+    
+    def _get_default_branch(self) -> str:
+        """
+        Fetch the default branch of the repository.
+
+        Returns:
+            str: The name of the default branch.
+        """
+        url = f"https://api.github.com/repos/{self.owner}/{self.repo}"
+        headers = {"Accept": "application/vnd.github+json", "Authorization": f"Bearer {self.token}"}
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            return response.json().get("default_branch")
+        else:
+            print(f"Failed to fetch repository info: {response.status_code}")
+            return "none"
         
