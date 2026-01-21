@@ -9,7 +9,7 @@ import os
 import sys
 import unittest
 from unittest.mock import patch, MagicMock
-
+from dotenv import load_dotenv
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'scripts'))
 
 from devin_orchestrator import (
@@ -541,4 +541,5 @@ class TestRealAPIIntegration(unittest.TestCase):
 
 
 if __name__ == '__main__':
+    load_dotenv()
     unittest.main()
