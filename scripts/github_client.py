@@ -51,19 +51,27 @@ class GitHubClient:
             print(f"Failed to fetch code scanning alerts: {response.status_code}")
             return {}
 
-    def get_latest_analysis(self) -> dict:
+    def get_latest_analysis(self, ref: str = None) -> dict:
         """
-        Fetches the analysis ID for the given repository owner and name.
+        Fetches the latest analysis for the given repository, optionally filtered by branch ref.
 
-        Returns an empty dictionary if no active alerts are found.
+        When ref is provided, only analyses for that specific branch are considered.
+        This ensures the SARIF data matches the branch context of the alerts being processed.
 
-        :return: A dictionary containing the analysis ID.
-        :rtype: dict
+        Args:
+            ref: Optional Git reference to filter analyses (e.g., "refs/heads/main" or "main").
+                 If not provided, returns the most recent analysis across all branches.
+
+        Returns:
+            A dictionary containing the analysis metadata, or empty dict if none found.
         """
         
         headers = {"Accept": "application/vnd.github+json", "Authorization": f"Bearer {self.token}"}
+        params = {}
+        if ref:
+            params["ref"] = ref
 
-        response = requests.get(self.analyses_url, headers=headers)
+        response = requests.get(self.analyses_url, headers=headers, params=params)
         if response.status_code == 200:
             analyses = response.json()
             
@@ -71,22 +79,30 @@ class GitHubClient:
                 #the most recent analysis is the first in the list
                 return analyses[0]
             else:
-                print("No analyses found.")
+                if ref:
+                    print(f"No analyses found for ref '{ref}'.")
+                else:
+                    print("No analyses found.")
                 return {}
         else:
             print(f"Failed to fetch analyses: {response.status_code}")
             return {}
     
-    def get_sarif_data(self) -> dict:
+    def get_sarif_data(self, ref: str = None) -> dict:
         """
-        Fetches the SARIF data for the given repository owner and name.
+        Fetches the SARIF data for the given repository, optionally filtered by branch ref.
 
-        Returns an empty dictionary if no active alerts are found.
+        When ref is provided, fetches SARIF from an analysis matching that branch.
+        This ensures the SARIF data matches the branch context of the alerts being processed.
 
-        :return: A dictionary containing the SARIF data.
-        :rtype: dict
+        Args:
+            ref: Optional Git reference to filter analyses (e.g., "refs/heads/main" or "main").
+                 If not provided, uses the most recent analysis across all branches.
+
+        Returns:
+            A dictionary containing the SARIF data, or empty dict if not found.
         """
-        analysis = self.get_latest_analysis()
+        analysis = self.get_latest_analysis(ref=ref)
         if not analysis:
             return {}
         

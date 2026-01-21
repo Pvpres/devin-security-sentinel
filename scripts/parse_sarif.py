@@ -580,3 +580,45 @@ def get_remediation_batches(minified_data: list[dict[str, Any]]) -> dict[str, di
         batches[rule_id]["tasks"].append(task)
 
     return batches
+
+
+def extract_dominant_ref(alerts: list[dict[str, Any]]) -> str | None:
+    """
+    Extract the most common branch ref from a list of alerts.
+
+    When alerts come from multiple branches, this function identifies the dominant
+    branch (the one with the most alerts) to ensure SARIF data is fetched from
+    the correct analysis context.
+
+    Args:
+        alerts: List of alerts from GitHubClient.get_active_alerts(). Each alert
+                should contain 'most_recent_instance.ref' indicating its branch.
+
+    Returns:
+        The most common ref string (e.g., "refs/heads/main"), or None if no
+        valid refs are found in the alerts.
+
+    Example:
+        >>> alerts = [
+        ...     {"most_recent_instance": {"ref": "refs/heads/main"}},
+        ...     {"most_recent_instance": {"ref": "refs/heads/main"}},
+        ...     {"most_recent_instance": {"ref": "refs/heads/feature"}}
+        ... ]
+        >>> extract_dominant_ref(alerts)
+        'refs/heads/main'
+    """
+    if not alerts:
+        return None
+
+    ref_counts: dict[str, int] = {}
+    for alert in alerts:
+        instance = alert.get("most_recent_instance", {})
+        ref = instance.get("ref")
+        if ref:
+            ref_counts[ref] = ref_counts.get(ref, 0) + 1
+
+    if not ref_counts:
+        return None
+
+    dominant_ref = max(ref_counts, key=ref_counts.get)
+    return dominant_ref

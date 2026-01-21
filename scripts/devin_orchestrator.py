@@ -1060,7 +1060,8 @@ if __name__ == "__main__":
     from parse_sarif import (
         build_active_alert_index,
         minify_sarif_state_aware,
-        get_remediation_batches_state_aware
+        get_remediation_batches_state_aware,
+        extract_dominant_ref
     )
     
     print(f"Fetching security data for {target_owner}/{target_repo}...")
@@ -1076,7 +1077,13 @@ if __name__ == "__main__":
     
     alert_index = build_active_alert_index(alerts)
     
-    sarif_data = client.get_sarif_data()
+    dominant_ref = extract_dominant_ref(alerts)
+    if dominant_ref:
+        print(f"Dominant branch ref: {dominant_ref}")
+    else:
+        print("Warning: Could not determine dominant branch ref from alerts")
+    
+    sarif_data = client.get_sarif_data(ref=dominant_ref)
     if not sarif_data:
         print("Failed to fetch SARIF data.")
         sys.exit(1)
