@@ -14,4 +14,4 @@ print("Alerts:", alerts)
 print("Keys", alerts[0].keys())
 
 
-print("Analysis ID:", client.get_latest_analysis())
+print("Analysis IDs by category:", client._get_latest_analysis_ids_by_category())
