@@ -1,0 +1,39 @@
+name: "Devin Security Orchestration (Single Job)"
+description: "If you want to run CodeQL and Devin Security Orchestrator in a single job,
+this is a sample format you can put in your .github/workflows/ directory to run the action"
+paste this into your already exisiting yml file or create a new one
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  security-scan:
+    name: "CodeQL + Devin Orchestrator"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # CodeQL initialization
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python
+
+      # CodeQL analysis
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+
+      # Your action runs AFTER CodeQL automatically
+      - name: Run Devin Security Orchestrator
+        uses: Pvpres/my-security-tool@v1
+        with:
+          owner: ${{ github.repository_owner }}
+          repo: ${{ github.event.repository.name }}
+          branch: ${{ github.ref_name }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          devin_api_key: ${{ secrets.DEVIN_API_KEY }}
