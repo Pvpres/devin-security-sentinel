@@ -17,20 +17,28 @@ def write_github_output(name: str, value: str) -> None:
 
 def main():
     if len(sys.argv) < 3:
-        print("Usage: python devin_orchestrator.py <owner> <repo> [<branch>]")
+        print("Usage: python main.py <owner> <repo> [<branch>] [<slack_channel_id>]")
         print("\nThis script requires the following environment variables:")
         print("  GH_TOKEN - GitHub Personal Access Token")
         print("  DEVIN_API_KEY - Devin AI API Key")
+        print("\nOptional environment variables for Slack integration:")
+        print("  SLACK_BOT_TOKEN - Slack Bot OAuth Token")
+        print("  SLACK_CHANNEL_ID - Slack Channel ID (can also be passed as 4th argument)")
         sys.exit(1)
     
     owner = sys.argv[1] #required
     repo = sys.argv[2] #required
     branch = None
     if len(sys.argv) > 3:
-        branch = sys.argv[3] or None
-
+        branch = sys.argv[3].strip() or None
+    
+    slack_channel_id = None
+    if len(sys.argv) > 4:
+        slack_channel_id = sys.argv[4].strip() or None
     GH_TOKEN = os.getenv("GH_TOKEN")
     DEVIN_API_KEY = os.getenv("DEVIN_API_KEY")
+    SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN")
+    SLACK_CHANNEL_ID = slack_channel_id or os.getenv("SLACK_CHANNEL_ID")
     
     if not GH_TOKEN:
         print("::error::Missing GH_TOKEN environment variable")
@@ -39,6 +47,11 @@ def main():
     if not DEVIN_API_KEY:
         print("::error::Missing DEVIN_API_KEY environment variable")
         sys.exit(1)
+    
+    if SLACK_BOT_TOKEN and SLACK_CHANNEL_ID:
+        print("Slack integration enabled - dashboard updates will be sent to Slack")
+    else:
+        print("Slack integration disabled - using terminal output only")
     
     start = time.time()
     
@@ -70,7 +83,7 @@ def main():
     
     print(f"Created {len(batches)} remediation batches")
     write_github_output("batches_created", str(len(batches)))
-    run_orchestrator(batches, owner=owner, repo=repo, max_workers=4)
+    run_orchestrator(batches, owner=owner, repo=repo, max_workers=4, slack_channel_id=SLACK_CHANNEL_ID)
     end = time.time()
     print(f"Total execution time: {end - start:.2f} seconds")
     write_github_output("status", "success")

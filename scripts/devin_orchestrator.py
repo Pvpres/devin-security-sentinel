@@ -39,19 +39,18 @@ from scripts.devin.DO_session import (
 from scripts.devin.DO_batch_processor import (
     dispatch_threads,
 )
-from scripts.devin.DO_reporting import (
-    print_summary,
-)
 from scripts.termination_logic import (
     get_available_session_slots,
 )
+from scripts.slack_client import SentinelDashboard
 
 
 def run_orchestrator(
     batches: dict[str, dict[str, Any]],
     owner: str | None = None,
     repo: str | None = None,
-    max_workers: int = MAX_WORKERS_DEFAULT
+    max_workers: int = MAX_WORKERS_DEFAULT,
+    slack_channel_id: str | None = None
 ) -> list[SessionResult]:
     """
     Main entry point for the Security Sentinel Orchestrator.
@@ -69,6 +68,7 @@ def run_orchestrator(
         owner: GitHub repository owner (defaults to env var GITHUB_OWNER)
         repo: GitHub repository name (defaults to env var GITHUB_REPO)
         max_workers: Maximum concurrent worker threads (default: 3)
+        slack_channel_id: Optional Slack channel ID for dashboard updates (overrides env var)
     
     Returns:
         List of SessionResult objects for all processed batches
@@ -134,9 +134,11 @@ def run_orchestrator(
     
     print("\nStarting remediation...")
     
-    results = dispatch_threads(batches, owner, repo, max_workers, available_slots)
+    dashboard = SentinelDashboard(batch_names=list(batches.keys()), channel_id=slack_channel_id)
     
-    print_summary(results)
+    results = dispatch_threads(batches, owner, repo, max_workers, available_slots, dashboard)
+    
+    dashboard.finalize_report(results)
     
     return results
 

@@ -23,6 +23,7 @@ class SessionResult:
     batch_id: str
     alert_numbers: list[int]
     pr_url: str | None = None
+    session_url: str | None = None
     error_message: str | None = None
     fixed_alerts: list[int] = field(default_factory=list)
     unfixed_alerts: list[int] = field(default_factory=list)
