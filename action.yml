@@ -65,7 +65,6 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.github_token }}
         DEVIN_API_KEY: ${{ inputs.devin_api_key }}
-        GITHUB_OUTPUT: ${{ github.output }}
       run: |
         python "${{ github.action_path }}/main.py" \
           "${{ inputs.owner }}" \
