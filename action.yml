@@ -27,6 +27,15 @@ inputs:
     description: "Devin API key"
     required: true
 
+  slack_bot_token:
+    description: "Slack bot OAuth Token if user wishes to send slack messages"
+    required: false
+
+  slack_channel_id:
+    description: "Slack channel id to send slack messages if needed"
+    required: false
+    default: ""
+
 outputs:
   alerts_found:
     description: "Number of active alerts found"
@@ -65,8 +74,12 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.github_token }}
         DEVIN_API_KEY: ${{ inputs.devin_api_key }}
+        SLACK_BOT_TOKEN: ${{ inputs.slack_bot_token }}
+   
       run: |
         python "${{ github.action_path }}/main.py" \
           "${{ inputs.owner }}" \
           "${{ inputs.repo }}" \
-          "${{ inputs.branch }}"
+          "${{ inputs.branch }}" \
+          "${{ inputs.slack_channel_id }}"
+          
