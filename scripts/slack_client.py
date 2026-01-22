@@ -18,6 +18,7 @@ class BatchInfo:
     """Stores tracking information for each batch."""
     status: str
     session_id: str | None = None
+    session_url: str | None = None
     pr_url: str | None = None
 
 
@@ -62,6 +63,7 @@ class SentinelDashboard:
         batch_name: str,
         status: str,
         session_id: str | None = None,
+        session_url: str | None = None,
         pr_url: str | None = None
     ) -> None:
         """
@@ -70,7 +72,8 @@ class SentinelDashboard:
         Args:
             batch_name: The batch identifier (e.g., 'py/sql_injection')
             status: Current status text (e.g., 'Started', 'Analyzing', 'Fixed')
-            session_id: Optional Devin session ID for building session URLs
+            session_id: Optional Devin session ID (fallback for URL construction)
+            session_url: Optional Devin session URL from API (preferred)
             pr_url: Optional PR URL if a fix was created
         """
         display_status = self._format_status_with_emoji(status)
@@ -85,6 +88,8 @@ class SentinelDashboard:
                 info.status = display_status
                 if session_id:
                     info.session_id = session_id
+                if session_url:
+                    info.session_url = session_url
                 if pr_url:
                     info.pr_url = pr_url
             self._render_active_swarm()
@@ -119,6 +124,8 @@ class SentinelDashboard:
             status_text = info.status
             if info.pr_url:
                 status_text += f" (<{info.pr_url}|View PR>)"
+            elif info.session_url:
+                status_text += f" (<{info.session_url}|View Session>)"
             elif info.session_id:
                 devin_url = f"{DEVIN_SESSION_URL_BASE}/{info.session_id}"
                 status_text += f" (<{devin_url}|View Session>)"
@@ -223,6 +230,8 @@ class SentinelDashboard:
                 batch_id = r.batch_id
                 if r.pr_url:
                     link_text = f"`{batch_id}` : <{r.pr_url}|View PR>"
+                elif r.session_url:
+                    link_text = f"`{batch_id}` : <{r.session_url}|View Devin Session>"
                 elif r.session_id:
                     devin_url = f"{DEVIN_SESSION_URL_BASE}/{r.session_id}"
                     link_text = f"`{batch_id}` : <{devin_url}|View Devin Session>"
@@ -248,7 +257,9 @@ class SentinelDashboard:
             for r in failed_results:
                 batch_id = r.batch_id
                 status_label = r.status.value.upper()
-                if r.session_id:
+                if r.session_url:
+                    link_text = f"`{batch_id}` [{status_label}] : <{r.session_url}|View Devin Session>"
+                elif r.session_id:
                     devin_url = f"{DEVIN_SESSION_URL_BASE}/{r.session_id}"
                     link_text = f"`{batch_id}` [{status_label}] : <{devin_url}|View Devin Session>"
                 else:
@@ -324,7 +335,9 @@ class SentinelDashboard:
             })
             
             for name, info in failed_batches:
-                if info.session_id:
+                if info.session_url:
+                    link_text = f"`{name}` : <{info.session_url}|View Devin Session>"
+                elif info.session_id:
                     devin_url = f"{DEVIN_SESSION_URL_BASE}/{info.session_id}"
                     link_text = f"`{name}` : <{devin_url}|View Devin Session>"
                 else:
@@ -387,6 +400,8 @@ class SentinelDashboard:
             print(f"  {status_icon} {r.batch_id}")
             if r.pr_url:
                 print(f"       PR: {r.pr_url}")
+            elif r.session_url:
+                print(f"       Devin: {r.session_url}")
             elif r.session_id:
                 print(f"       Devin: {DEVIN_SESSION_URL_BASE}/{r.session_id}")
         

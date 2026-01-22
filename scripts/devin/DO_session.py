@@ -151,6 +151,7 @@ def get_active_session_count() -> int:
 
 def poll_session_status(
     session_id: str,
+    session_url: str | None = None,
     poll_interval: int = POLL_INTERVAL_SECONDS,
     timeout: int = SESSION_TIMEOUT_SECONDS,
     stagnation_threshold: int = STAGNATION_THRESHOLD_SECONDS
@@ -166,6 +167,7 @@ def poll_session_status(
     
     Args:
         session_id: The Devin session ID to monitor
+        session_url: The session URL from the API (for linking in reports)
         poll_interval: Seconds between status checks (default: 150)
         timeout: Maximum seconds to wait for completion (default: 1200)
         stagnation_threshold: Seconds without progress before marking stuck (default: 300)
@@ -191,6 +193,7 @@ def poll_session_status(
                 session_id=session_id,
                 batch_id="",
                 alert_numbers=[],
+                session_url=session_url,
                 error_message=f"Session timed out after {timeout} seconds"
             )
         
@@ -219,6 +222,7 @@ def poll_session_status(
                 session_id=session_id,
                 batch_id="",
                 alert_numbers=[],
+                session_url=session_url,
                 error_message=f"Session stagnated for {stagnation_time:.0f} seconds"
             )
         
@@ -232,7 +236,8 @@ def poll_session_status(
                 session_id=session_id,
                 batch_id="",
                 alert_numbers=[],
-                pr_url=pr_url
+                pr_url=pr_url,
+                session_url=session_url
             )
         
         if status in ("finished", "completed", "success"):
@@ -242,7 +247,8 @@ def poll_session_status(
                 session_id=session_id,
                 batch_id="",
                 alert_numbers=[],
-                pr_url=pr_url
+                pr_url=pr_url,
+                session_url=session_url
             )
         
         if status in ("failed", "error", "cancelled"):
@@ -253,6 +259,7 @@ def poll_session_status(
                 session_id=session_id,
                 batch_id="",
                 alert_numbers=[],
+                session_url=session_url,
                 error_message=error_msg
             )
         
@@ -263,6 +270,7 @@ def poll_session_status(
                 session_id=session_id,
                 batch_id="",
                 alert_numbers=[],
+                session_url=session_url,
                 error_message="Session is blocked and requires manual intervention"
             )
         

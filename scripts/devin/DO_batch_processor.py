@@ -145,17 +145,18 @@ def process_batch(
             )
         
         session_id = session_response.get("session_id", "")
+        session_url = session_response.get("url")
         print(f"[Batch] Devin session created: {session_id} for batch {batch_id}")
         
         if dashboard:
-            dashboard.update(batch_id, "Started", session_id=session_id)
+            dashboard.update(batch_id, "Started", session_id=session_id, session_url=session_url)
         
         state.register_session(session_id, batch_id, alert_numbers)
         
         if dashboard:
-            dashboard.update(batch_id, "Analyzing...", session_id=session_id)
+            dashboard.update(batch_id, "Analyzing...", session_id=session_id, session_url=session_url)
         
-        result = poll_session_status(session_id)
+        result = poll_session_status(session_id, session_url=session_url)
         
         result.batch_id = batch_id
         result.alert_numbers = alert_numbers
@@ -166,7 +167,7 @@ def process_batch(
         
         final_status = f"Completed: {result.status.value}"
         if dashboard:
-            dashboard.update(batch_id, final_status, session_id=session_id, pr_url=result.pr_url)
+            dashboard.update(batch_id, final_status, session_id=session_id, pr_url=result.pr_url, session_url=result.session_url)
         
         return result
     
