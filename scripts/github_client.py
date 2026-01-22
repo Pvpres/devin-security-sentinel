@@ -1,9 +1,9 @@
 import os
 import requests
 
+VALID_SEVERITIES = frozenset({"critical", "high", "medium", "low", "warning", "note", "error"})
 
-#add functionality in alerts later so user can edit yaml file if thet only want
-#alerts of a certain file, only critical issues, etc
+
 class GitHubClient:
     def __init__(self, owner: str, repo: str, token: str = None, branch: str = None):
         """
@@ -29,32 +29,55 @@ class GitHubClient:
             raise ValueError("GH_TOKEN environment variable is not set and no token was provided")
         return token_value
 
-    #add severity filer later
-    def get_active_alerts(self, severity: list[str] = None) -> dict:
+    def get_active_alerts(self, severity: list[str] | None = None) -> list:
         """
         Fetch all active code scanning alerts for the given repository.
 
         Args:
-            severity (list[str], optional): List of severity levels to filter by. Defaults to None.
+            severity (list[str], optional): List of severity levels to filter by.
+                Valid values: critical, high, medium, low, warning, note, error.
+                If None or empty, returns all alerts. Defaults to None.
 
         Returns:
-            dict: A dictionary containing the active code scanning alerts.
-        """
-        headers = {"Accept": "application/vnd.github+json", "Authorization": f"Bearer {self.token}"}
-        #only get alerts not already assigned to someone in the organization
-        
-        params = {"state": "open", "assignees" : "none", "ref": self.branch, "per_page": 100}
+            list: A list containing the active code scanning alerts.
 
-        response = requests.get(self.codescan_url, headers=headers, params=params)
-        if response.status_code == 200:
-            alerts = response.json()
-            # if severity:
-            #     sev_set = set(s.lower() for s in severity)
-            #     alerts = [a for a in alerts if a.get("rule", {}).get("security_severity_level", "") in sev_set]
-            return alerts
-        else:
-            print(f"Failed to fetch code scanning alerts: {response.status_code}")
-            return {}
+        Raises:
+            ValueError: If any provided severity value is not valid.
+        """
+        if severity:
+            invalid = set(s.lower() for s in severity) - VALID_SEVERITIES
+            if invalid:
+                raise ValueError(
+                    f"Invalid severity values: {invalid}. "
+                    f"Valid values are: {', '.join(sorted(VALID_SEVERITIES))}"
+                )
+
+        headers = {"Accept": "application/vnd.github+json", "Authorization": f"Bearer {self.token}"}
+        base_params = {"state": "open", "assignees": "none", "ref": self.branch, "per_page": 100}
+
+        if not severity:
+            response = requests.get(self.codescan_url, headers=headers, params=base_params)
+            if response.status_code == 200:
+                return response.json()
+            else:
+                print(f"Failed to fetch code scanning alerts: {response.status_code}")
+                return []
+
+        all_alerts = []
+        seen_ids = set()
+        for sev in severity:
+            params = {**base_params, "severity": sev.lower()}
+            response = requests.get(self.codescan_url, headers=headers, params=params)
+            if response.status_code == 200:
+                for alert in response.json():
+                    alert_id = alert.get("number")
+                    if alert_id not in seen_ids:
+                        seen_ids.add(alert_id)
+                        all_alerts.append(alert)
+            else:
+                print(f"Failed to fetch alerts for severity '{sev}': {response.status_code}")
+
+        return all_alerts
 
     def _get_latest_analysis_id(self) -> dict:
         """
