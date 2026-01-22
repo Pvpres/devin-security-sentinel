@@ -30,12 +30,11 @@ def main():
     repo = sys.argv[2] #required
     branch = None
     if len(sys.argv) > 3:
-        branch = sys.argv[3] or None
+        branch = sys.argv[3].strip() or None
     
     slack_channel_id = None
     if len(sys.argv) > 4:
-        slack_channel_id = sys.argv[4] or None
-
+        slack_channel_id = sys.argv[4].strip() or None
     GH_TOKEN = os.getenv("GH_TOKEN")
     DEVIN_API_KEY = os.getenv("DEVIN_API_KEY")
     SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN")
