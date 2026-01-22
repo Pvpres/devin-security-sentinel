@@ -167,6 +167,11 @@ class SentinelDashboard:
         
         hours_saved = successes * 2
         
+        successful_results = [r for r in results if r.status == SessionStatus.SUCCESS]
+        failed_results = [r for r in results if r.status in (
+            SessionStatus.FAILURE, SessionStatus.PARTIAL, SessionStatus.STUCK, SessionStatus.TIMEOUT
+        )]
+        
         blocks = [
             {
                 "type": "header", 
@@ -204,28 +209,55 @@ class SentinelDashboard:
                     {"type": "mrkdwn", "text": f"*Fixed:* {fixed_alerts}"},
                     {"type": "mrkdwn", "text": f"*Unfixed:* {unfixed_alerts}"}
                 ]
-            },
-            {"type": "divider"},
-            {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": "*Results*"}
             }
         ]
         
-        for r in results:
-            batch_id = r.batch_id
-            if r.status == SessionStatus.SUCCESS and r.pr_url:
-                link_text = f"`{batch_id}` : <{r.pr_url}|View PR>"
-            elif r.session_id:
-                devin_url = f"{DEVIN_SESSION_URL_BASE}/{r.session_id}"
-                link_text = f"`{batch_id}` : <{devin_url}|View Devin Session>"
-            else:
-                link_text = f"`{batch_id}` : No session available"
-            
+        if successful_results:
+            blocks.append({"type": "divider"})
             blocks.append({
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": link_text}
+                "text": {"type": "mrkdwn", "text": "*Successfully Fixed*"}
             })
+            
+            for r in successful_results:
+                batch_id = r.batch_id
+                if r.pr_url:
+                    link_text = f"`{batch_id}` : <{r.pr_url}|View PR>"
+                elif r.session_id:
+                    devin_url = f"{DEVIN_SESSION_URL_BASE}/{r.session_id}"
+                    link_text = f"`{batch_id}` : <{devin_url}|View Devin Session>"
+                else:
+                    link_text = f"`{batch_id}` : No session available"
+                
+                blocks.append({
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": link_text}
+                })
+        
+        if failed_results:
+            blocks.append({"type": "divider"})
+            blocks.append({
+                "type": "header",
+                "text": {"type": "plain_text", "text": "NEEDS HUMAN REVIEW", "emoji": True}
+            })
+            blocks.append({
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": f"*{len(failed_results)} batch(es) require manual review:*"}
+            })
+            
+            for r in failed_results:
+                batch_id = r.batch_id
+                status_label = r.status.value.upper()
+                if r.session_id:
+                    devin_url = f"{DEVIN_SESSION_URL_BASE}/{r.session_id}"
+                    link_text = f"`{batch_id}` [{status_label}] : <{devin_url}|View Devin Session>"
+                else:
+                    link_text = f"`{batch_id}` [{status_label}] : No session available"
+                
+                blocks.append({
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": link_text}
+                })
         
         self._print_terminal_summary(results)
         
@@ -239,7 +271,10 @@ class SentinelDashboard:
         """Render final summary using batch_info (fallback when no results provided)."""
         duration = int((time.time() - self.start_time) / 60)
         
-        successes = sum(1 for info in self.batch_info.values() if info.pr_url)
+        successful_batches = [(name, info) for name, info in self.batch_info.items() if info.pr_url]
+        failed_batches = [(name, info) for name, info in self.batch_info.items() if not info.pr_url]
+        
+        successes = len(successful_batches)
         total = len(self.batch_info)
         hours_saved = successes * 2
         
@@ -260,27 +295,45 @@ class SentinelDashboard:
                     {"type": "mrkdwn", "text": f"*Successes:* {successes}"},
                     {"type": "mrkdwn", "text": "*Agent:* Devin (Cognition AI)"}
                 ]
-            },
-            {"type": "divider"},
-            {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": "*Results*"}
             }
         ]
         
-        for name, info in self.batch_info.items():
-            if info.pr_url:
-                link_text = f"`{name}` : <{info.pr_url}|View PR>"
-            elif info.session_id:
-                devin_url = f"{DEVIN_SESSION_URL_BASE}/{info.session_id}"
-                link_text = f"`{name}` : <{devin_url}|View Devin Session>"
-            else:
-                link_text = f"`{name}` : No session available"
-            
+        if successful_batches:
+            blocks.append({"type": "divider"})
             blocks.append({
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": link_text}
+                "text": {"type": "mrkdwn", "text": "*Successfully Fixed*"}
             })
+            
+            for name, info in successful_batches:
+                link_text = f"`{name}` : <{info.pr_url}|View PR>"
+                blocks.append({
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": link_text}
+                })
+        
+        if failed_batches:
+            blocks.append({"type": "divider"})
+            blocks.append({
+                "type": "header",
+                "text": {"type": "plain_text", "text": "NEEDS HUMAN REVIEW", "emoji": True}
+            })
+            blocks.append({
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": f"*{len(failed_batches)} batch(es) require manual review:*"}
+            })
+            
+            for name, info in failed_batches:
+                if info.session_id:
+                    devin_url = f"{DEVIN_SESSION_URL_BASE}/{info.session_id}"
+                    link_text = f"`{name}` : <{devin_url}|View Devin Session>"
+                else:
+                    link_text = f"`{name}` : No session available"
+                
+                blocks.append({
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": link_text}
+                })
         
         print("All batches processed. Sentinel Run Complete.")
         
