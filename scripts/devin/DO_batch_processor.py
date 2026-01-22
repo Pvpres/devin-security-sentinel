@@ -2,7 +2,7 @@
 
 import time
 import threading
-from typing import Any
+from typing import Any, TYPE_CHECKING
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .DO_models import SessionStatus, SessionResult, OrchestratorState
@@ -17,6 +17,9 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from termination_logic import send_sleep_message
+
+if TYPE_CHECKING:
+    from scripts.slack_client import SentinelDashboard
 
 def extract_alert_numbers(batch_data: dict[str, Any]) -> list[int]:
     """
@@ -47,7 +50,8 @@ def process_batch(
     owner: str,
     repo: str,
     state: OrchestratorState,
-    session_semaphore: threading.Semaphore | None = None
+    session_semaphore: threading.Semaphore | None = None,
+    dashboard: "SentinelDashboard | None" = None
 ) -> SessionResult:
     """
     Process a single remediation batch end-to-end.
@@ -67,6 +71,7 @@ def process_batch(
         repo: GitHub repository name
         state: Shared orchestrator state for tracking
         session_semaphore: Optional semaphore to limit concurrent active sessions
+        dashboard: Optional SentinelDashboard for Slack updates
     
     Returns:
         SessionResult with final status and details
@@ -142,7 +147,13 @@ def process_batch(
         session_id = session_response.get("session_id", "")
         print(f"[Batch] Devin session created: {session_id} for batch {batch_id}")
         
+        if dashboard:
+            dashboard.update(batch_id, "Started", session_id=session_id)
+        
         state.register_session(session_id, batch_id, alert_numbers)
+        
+        if dashboard:
+            dashboard.update(batch_id, "Analyzing...", session_id=session_id)
         
         result = poll_session_status(session_id)
         
@@ -152,6 +163,10 @@ def process_batch(
         result = handle_session_outcome(result, owner, repo)
         
         state.add_result(result)
+        
+        final_status = f"Completed: {result.status.value}"
+        if dashboard:
+            dashboard.update(batch_id, final_status, session_id=session_id, pr_url=result.pr_url)
         
         return result
     
@@ -170,7 +185,8 @@ def dispatch_threads(
     owner: str,
     repo: str,
     max_workers: int = MAX_WORKERS_DEFAULT,
-    available_session_slots: int = MAX_ACTIVE_SESSIONS
+    available_session_slots: int = MAX_ACTIVE_SESSIONS,
+    dashboard: "SentinelDashboard | None" = None
 ) -> list[SessionResult]:
     """
     Dispatch remediation batches to parallel worker threads.
@@ -193,6 +209,7 @@ def dispatch_threads(
         repo: GitHub repository name
         max_workers: Maximum concurrent threads (default: 3)
         available_session_slots: Number of available session slots (default: MAX_ACTIVE_SESSIONS)
+        dashboard: Optional SentinelDashboard for Slack updates
     
     Returns:
         List of SessionResult objects for all processed batches
@@ -218,7 +235,8 @@ def dispatch_threads(
                 owner,
                 repo,
                 state,
-                session_semaphore
+                session_semaphore,
+                dashboard
             ): batch_id
             for batch_id, batch_data in batches.items()
         }

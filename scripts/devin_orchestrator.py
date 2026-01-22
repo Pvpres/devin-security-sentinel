@@ -39,12 +39,10 @@ from scripts.devin.DO_session import (
 from scripts.devin.DO_batch_processor import (
     dispatch_threads,
 )
-from scripts.devin.DO_reporting import (
-    print_summary,
-)
 from scripts.termination_logic import (
     get_available_session_slots,
 )
+from scripts.slack_client import SentinelDashboard
 
 
 def run_orchestrator(
@@ -134,9 +132,11 @@ def run_orchestrator(
     
     print("\nStarting remediation...")
     
-    results = dispatch_threads(batches, owner, repo, max_workers, available_slots)
+    dashboard = SentinelDashboard(batch_names=list(batches.keys()))
     
-    print_summary(results)
+    results = dispatch_threads(batches, owner, repo, max_workers, available_slots, dashboard)
+    
+    dashboard.finalize_report(results)
     
     return results
 
