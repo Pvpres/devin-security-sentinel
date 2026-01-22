@@ -56,52 +56,79 @@ class GitHubClient:
             print(f"Failed to fetch code scanning alerts: {response.status_code}")
             return {}
 
-    def _get_latest_analysis_id(self) -> dict:
+    def _get_latest_analysis_ids_by_category(self) -> dict[str, int]:
         """
-        Fetches the analysis ID for the given repository owner and name.
+        Fetches the latest analysis ID for each language/tool category.
 
-        Returns an empty dictionary if no active alerts are found.
+        GitHub Code Scanning creates separate analyses for different languages
+        (e.g., JavaScript, Python). This method returns the most recent analysis
+        ID for each category to ensure complete SARIF coverage across all languages.
 
-        :return: A dictionary containing the analysis ID.
-        :rtype: dict
+        Returns:
+            dict[str, int]: A dictionary mapping category strings to analysis IDs.
+                           Empty dict if no analyses are found.
+
+        Example:
+            {
+                "/language:javascript-typescript": 914193227,
+                "/language:python": 914192873
+            }
         """
-        
         headers = {"Accept": "application/vnd.github+json", "Authorization": f"Bearer {self.token}"}
-        params = {"ref": self.branch, "per_page": 1}
+        params = {"ref": self.branch, "per_page": 100}
         response = requests.get(self.analyses_url, headers=headers, params=params)
         if response.status_code == 200:
             analyses = response.json()
-            if analyses:
-                #the most recent analysis is the first in the list
-                return analyses[0].get("id", "")
-            else:
+            if not analyses:
                 print("No analyses found.")
                 return {}
+
+            latest_by_category: dict[str, int] = {}
+            for analysis in analyses:
+                category = analysis.get("category", "")
+                analysis_id = analysis.get("id")
+                if category and analysis_id and category not in latest_by_category:
+                    latest_by_category[category] = analysis_id
+
+            return latest_by_category
         else:
             print(f"Failed to fetch analyses: {response.status_code}")
             return {}
     
     def get_sarif_data(self) -> dict:
         """
-        Fetches the SARIF data for the given repository owner and name.
+        Fetches and merges SARIF data from all language analyses.
 
-        Returns an empty dictionary if no active alerts are found.
+        GitHub Code Scanning creates separate analyses for different languages.
+        This method fetches SARIF from each language's latest analysis and merges
+        them into a single SARIF structure with combined runs.
 
-        :return: A dictionary containing the SARIF data.
-        :rtype: dict
+        Returns:
+            dict: A merged SARIF dictionary containing runs from all language analyses.
+                  Returns empty dict if no analyses are found.
+
+        Example:
+            The returned SARIF will have a 'runs' array containing results from
+            all languages (e.g., both JavaScript and Python vulnerabilities).
         """
-        id = self._get_latest_analysis_id()
-        if not id:
+        analysis_ids_by_category = self._get_latest_analysis_ids_by_category()
+        if not analysis_ids_by_category:
             return {}
-        
-        sarif_url = f"{self.analyses_url}/{id}"
+
         headers = {"Accept": "application/sarif+json", "Authorization": f"Bearer {self.token}"}
-        response = requests.get(sarif_url, headers=headers)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            print(f"Failed to fetch SARIF data: {response.status_code}")
-            return {}
+        merged_sarif: dict = {"$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json", "version": "2.1.0", "runs": []}
+
+        for category, analysis_id in analysis_ids_by_category.items():
+            sarif_url = f"{self.analyses_url}/{analysis_id}"
+            response = requests.get(sarif_url, headers=headers)
+            if response.status_code == 200:
+                sarif_data = response.json()
+                runs = sarif_data.get("runs", [])
+                merged_sarif["runs"].extend(runs)
+            else:
+                print(f"Failed to fetch SARIF data for category {category}: {response.status_code}")
+
+        return merged_sarif if merged_sarif["runs"] else {}
     
     def _get_default_branch(self) -> str:
         """

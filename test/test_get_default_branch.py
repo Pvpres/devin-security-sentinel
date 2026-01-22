@@ -19,8 +19,8 @@ print("Default branch:", default_branch)
 obj = client.get_active_alerts()
 print(len(obj))
 
-data = client.get_latest_analysis()
-print("Latest analysis ID:", data)
+data = client._get_latest_analysis_ids_by_category()
+print("Latest analysis IDs by category:", data)
 
 # client.get_active_alerts(branch=default_branch)
 # print(client.get_active_alerts(branch="non_existent_branch"))
