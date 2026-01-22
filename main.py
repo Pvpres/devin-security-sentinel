@@ -6,6 +6,14 @@ import sys
 import os
 
 
+def write_github_output(name: str, value: str) -> None:
+    """Write output to GitHub Actions output file if running in CI."""
+    github_output = os.getenv("GITHUB_OUTPUT")
+    if github_output:
+        with open(github_output, "a") as f:
+            f.write(f"{name}={value}\n")
+
+
 
 def main():
     if len(sys.argv) < 3:
@@ -17,6 +25,7 @@ def main():
     
     owner = sys.argv[1] #required
     repo = sys.argv[2] #required
+    branch = None
     if len(sys.argv) > 3:
         branch = sys.argv[3] or None
 
@@ -38,23 +47,33 @@ def main():
     
     if not alerts:
         print("No active unassigned alerts found.")
+        write_github_output("alerts_found", "0")
+        write_github_output("batches_created", "0")
+        write_github_output("status", "no_alerts")
         sys.exit(0)
     print(f"Found {len(alerts)} active alerts")
+    write_github_output("alerts_found", str(len(alerts)))
     
     sarif_data = client.get_sarif_data()
     if not sarif_data:
         print("Failed to fetch SARIF data.")
+        write_github_output("batches_created", "0")
+        write_github_output("status", "failed")
         sys.exit(1)
     
     batches = run_state_aware_parse(sarif_data, alerts)
     if not batches:
         print("No remediation batches created.")
+        write_github_output("batches_created", "0")
+        write_github_output("status", "no_alerts")
         sys.exit(0)
     
     print(f"Created {len(batches)} remediation batches")
+    write_github_output("batches_created", str(len(batches)))
     run_orchestrator(batches, owner=owner, repo=repo, max_workers=4)
     end = time.time()
     print(f"Total execution time: {end - start:.2f} seconds")
+    write_github_output("status", "success")
     
 
 if __name__ == "__main__":
