@@ -1,3 +1,24 @@
+"""
+GitHub Alert Control Center for Security Sentinel.
+
+This module provides functions for managing GitHub code scanning alerts during
+the remediation process. It handles claiming (assigning), unclaiming, and
+closing alerts to prevent race conditions between concurrent orchestrator runs.
+
+The claiming mechanism assigns alerts to a bot user before remediation begins,
+ensuring that multiple orchestrator instances don't attempt to fix the same
+vulnerabilities simultaneously.
+
+Key Functions:
+    claim_github_alerts: Assign alerts to the bot user to prevent conflicts.
+    unclaim_github_alerts: Release alerts back to the pool for retry.
+    close_github_alerts: Mark alerts as dismissed after successful remediation.
+
+Environment Variables:
+    GH_TOKEN: GitHub Personal Access Token with security_events write permission.
+    DEVIN_BOT_USERNAME: Optional bot username for claiming (defaults to PAT owner).
+"""
+
 import requests
 import os
 import time
@@ -6,16 +27,6 @@ from .DO_config import get_github_token
 CLAIM_RETRY_ATTEMPTS = 3
 CLAIM_RETRY_DELAY_SECONDS = 2
 GITHUB_API_BASE = "https://api.github.com"
-
-
-"""Control center functions for claiming and unclaiming GitHub code scanning alerts. 
-To be used by the orchestrator, these functions should be imported from this module."""
-
-"""Key Components:
-- claim_github_alerts: Claims alerts by assigning them to a bot user
-- unclaim_github_alerts: Unclaims alerts by removing the bot user assignment
-- close_github_alerts: Closes alerts after successful remediation
-"""
 
 def _get_bot_username() -> str:
     """

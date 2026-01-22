@@ -1,4 +1,19 @@
-"""Batch processing and parallel thread management."""
+"""
+Batch Processing and Parallel Thread Management for Security Sentinel.
+
+This module handles the parallel processing of remediation batches using
+ThreadPoolExecutor. It coordinates the full lifecycle of each batch:
+claiming alerts, creating Devin sessions, polling for completion, and
+handling outcomes.
+
+The module uses a semaphore to limit concurrent active Devin sessions,
+ensuring the system stays within API limits while maximizing throughput.
+
+Key Functions:
+    extract_alert_numbers: Extract alert numbers from batch data.
+    process_batch: Process a single remediation batch end-to-end.
+    dispatch_threads: Dispatch multiple batches to parallel worker threads.
+"""
 
 import time
 import threading
@@ -12,7 +27,6 @@ from .DO_session import create_devin_session, poll_session_status
 from .DO_outcomes import handle_session_outcome
 from .DO_config import MAX_WORKERS_DEFAULT, MAX_ACTIVE_SESSIONS
 
-# Import from parent scripts directory
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))

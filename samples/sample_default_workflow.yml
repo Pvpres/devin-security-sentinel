@@ -1,49 +1,102 @@
-name: "Devin Security Sentinel Example"
-description: "For using the Devin Security Sentinel GitHub Action to remediate security alerts
-this is a sample format you can put in your .github/workflows/ directory to run the action"
-pastle this into your already exisiting yml file or create a new one
+# =============================================================================
+# Devin Security Sentinel - Default Workflow Example
+# =============================================================================
+# This workflow runs CodeQL security scanning followed by Devin AI remediation.
+# Copy this file to your repository's .github/workflows/ directory.
+#
+# Prerequisites:
+#   1. Add DEVIN_API_KEY to your repository secrets (Settings > Secrets > Actions)
+#   2. Optionally add SLACK_BOT_TOKEN and SLACK_CHANNEL_ID for Slack notifications
+#   3. Ensure your repository has GitHub Advanced Security enabled for code scanning
+# =============================================================================
 
+name: "Devin Security Sentinel"
+
+# Workflow triggers - customize based on your needs
 on:
+  # Manual trigger from GitHub Actions UI
   workflow_dispatch:
+
+  # Automatic trigger on push to main branches
   push:
     branches:
       - main
       - master
+
+  # Optional: Run on a schedule (e.g., daily at midnight UTC)
+  # schedule:
+  #   - cron: '0 0 * * *'
 
 jobs:
   run-devin-orchestrator:
     name: "Run Devin Security Remediation"
     runs-on: ubuntu-latest
 
+    # Optional: Set permissions explicitly for security
+    permissions:
+      contents: read
+      security-events: write
+
     steps:
-      # Always required so your action can access the repository
+      # ---------------------------------------------------------------------
+      # Step 1: Checkout Repository
+      # Required for all workflows - gives the action access to your code
+      # ---------------------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # OPTIONAL: Run CodeQL first if users want fresh SARIF data
-      # They can remove this block if they already have alerts in GitHub Security
+      # ---------------------------------------------------------------------
+      # Step 2: Initialize CodeQL (Optional)
+      # Remove this block if you already have CodeQL alerts in GitHub Security
+      # or if you're using a different security scanning tool
+      # ---------------------------------------------------------------------
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
+          # Specify languages to analyze - add more as needed
+          # Supported: python, javascript, typescript, java, csharp, cpp, go, ruby
           languages: python
 
+      # ---------------------------------------------------------------------
+      # Step 3: Run CodeQL Analysis (Optional)
+      # Performs the actual security scan and uploads results to GitHub
+      # ---------------------------------------------------------------------
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
 
-      # Your action
+      # ---------------------------------------------------------------------
+      # Step 4: Run Devin Security Sentinel
+      # This is the main action that orchestrates AI-powered remediation
+      # ---------------------------------------------------------------------
       - name: Run Devin Security Orchestrator
         uses: Pvpres/devin-security-sentinel@v1
         with:
-          # Required inputs
+          # -----------------------------------------------------------------
+          # Required Inputs
+          # -----------------------------------------------------------------
+          # Repository owner (automatically populated from GitHub context)
           owner: ${{ github.repository_owner }}
+
+          # Repository name (automatically populated from GitHub context)
           repo: ${{ github.event.repository.name }}
 
-          # Optional branch (defaults to the branch that triggered the workflow)
-          branch: ${{ github.ref_name }}
-
-          # Required secrets
+          # GitHub token for API access (use GITHUB_TOKEN for basic access,
+          # or a PAT with 'security_events' scope for full functionality)
           github_token: ${{ secrets.GITHUB_TOKEN }}
+
+          # Devin API key for AI remediation (add to repository secrets)
           devin_api_key: ${{ secrets.DEVIN_API_KEY }}
 
-          # Optional: if your action supports it
-          # max_workers: 4
+          # -----------------------------------------------------------------
+          # Optional Inputs
+          # -----------------------------------------------------------------
+          # Branch to analyze (defaults to the branch that triggered the workflow)
+          branch: ${{ github.ref_name }}
+
+          # Slack integration for real-time progress updates
+          # Add SLACK_BOT_TOKEN to your repository secrets
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+          # Slack channel ID where updates will be posted
+          # Find this in Slack: right-click channel > View channel details > scroll to bottom
+          slack_channel_id: ${{ secrets.SLACK_CHANNEL_ID }}

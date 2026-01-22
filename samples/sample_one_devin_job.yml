@@ -1,9 +1,23 @@
+# =============================================================================
+# Devin Security Sentinel - Single Job Workflow
+# =============================================================================
+# This workflow runs CodeQL and Devin remediation in a single job.
+# Use this when you want the simplest possible setup with minimal configuration.
+# Copy this file to your repository's .github/workflows/ directory.
+#
+# Prerequisites:
+#   1. Add DEVIN_API_KEY to your repository secrets (Settings > Secrets > Actions)
+#   2. Optionally add SLACK_BOT_TOKEN and SLACK_CHANNEL_ID for Slack notifications
+# =============================================================================
+
 name: "Devin Security Orchestration (Single Job)"
-description: "If you want to run CodeQL and Devin Security Orchestrator in a single job,
-this is a sample format you can put in your .github/workflows/ directory to run the action"
-paste this into your already exisiting yml file or create a new one
+
+# Workflow triggers
 on:
+  # Manual trigger from GitHub Actions UI
   workflow_dispatch:
+
+  # Automatic trigger on push to main branches
   push:
     branches:
       - main
@@ -14,26 +28,51 @@ jobs:
     name: "CodeQL + Devin Orchestrator"
     runs-on: ubuntu-latest
 
+    # Permissions required for code scanning
+    permissions:
+      contents: read
+      security-events: write
+
     steps:
+      # ---------------------------------------------------------------------
+      # Step 1: Checkout Repository
+      # ---------------------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # CodeQL initialization
+      # ---------------------------------------------------------------------
+      # Step 2: Initialize CodeQL
+      # Sets up CodeQL for the specified languages
+      # ---------------------------------------------------------------------
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
+          # Add your project's languages here
           languages: python
 
-      # CodeQL analysis
+      # ---------------------------------------------------------------------
+      # Step 3: Run CodeQL Analysis
+      # Scans code and uploads results to GitHub Security tab
+      # ---------------------------------------------------------------------
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
 
-      # Your action runs AFTER CodeQL automatically
+      # ---------------------------------------------------------------------
+      # Step 4: Run Devin Security Sentinel
+      # Automatically runs after CodeQL completes in the same job
+      # ---------------------------------------------------------------------
       - name: Run Devin Security Orchestrator
         uses: Pvpres/devin-security-sentinel@v1
         with:
+          # Required inputs
           owner: ${{ github.repository_owner }}
           repo: ${{ github.event.repository.name }}
-          branch: ${{ github.ref_name }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           devin_api_key: ${{ secrets.DEVIN_API_KEY }}
+
+          # Optional: specify branch (defaults to triggered branch)
+          branch: ${{ github.ref_name }}
+
+          # Optional: Slack integration for real-time updates
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+          slack_channel_id: ${{ secrets.SLACK_CHANNEL_ID }}

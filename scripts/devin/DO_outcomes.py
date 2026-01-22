@@ -1,4 +1,16 @@
-"""Session outcome reconciliation with GitHub alert states."""
+"""
+Session Outcome Reconciliation for Security Sentinel.
+
+This module handles the reconciliation of Devin session outcomes with GitHub
+alert states. After a session completes (successfully or not), this module
+updates the corresponding GitHub alerts appropriately.
+
+Outcome Handling:
+    SUCCESS: Close all associated alerts (mark as fixed).
+    FAILURE: Unclaim all alerts so they can be retried in future runs.
+    PARTIAL: Close fixed alerts, unclaim unfixed alerts.
+    STUCK/TIMEOUT: Unclaim all alerts for retry.
+"""
 
 from .DO_models import SessionStatus, SessionResult
 from .DO_gh_alerts_control_center import (

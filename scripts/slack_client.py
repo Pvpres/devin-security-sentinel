@@ -1,3 +1,27 @@
+"""
+Slack Dashboard Client for Security Sentinel.
+
+This module provides the SentinelDashboard class for real-time Slack notifications
+during security remediation runs. It displays batch progress, session status,
+and final summary reports using Slack's Block Kit for rich formatting.
+
+The dashboard operates in two modes:
+1. Slack Mode: When SLACK_BOT_TOKEN and SLACK_CHANNEL_ID are configured, updates
+   are posted to Slack with live-updating messages.
+2. Terminal Fallback: When Slack credentials are missing, status updates are
+   printed to the terminal instead.
+
+Environment Variables:
+    SLACK_BOT_TOKEN: Slack Bot OAuth Token for API authentication.
+    SLACK_CHANNEL_ID: Target Slack channel ID for posting updates.
+
+Example:
+    >>> from scripts.slack_client import SentinelDashboard
+    >>> dashboard = SentinelDashboard(batch_names=['py/sql-injection', 'py/xss'])
+    >>> dashboard.update('py/sql-injection', 'Started', session_id='abc123')
+    >>> dashboard.finalize_report(results)
+"""
+
 import os
 import threading
 import time
@@ -15,7 +39,18 @@ DEVIN_SESSION_URL_BASE = "https://app.devin.ai/sessions"
 
 @dataclass
 class BatchInfo:
-    """Stores tracking information for each batch."""
+    """
+    Stores tracking information for each remediation batch.
+    
+    This dataclass holds the current state of a batch being processed,
+    including its status and any associated URLs for tracking progress.
+    
+    Attributes:
+        status: Current status text (e.g., 'In Queue', 'Started', 'Analyzing', 'Fixed').
+        session_id: Optional Devin session ID for URL construction fallback.
+        session_url: Optional direct URL to the Devin session (preferred over session_id).
+        pr_url: Optional URL to the pull request if a fix was created.
+    """
     status: str
     session_id: str | None = None
     session_url: str | None = None
@@ -23,7 +58,41 @@ class BatchInfo:
 
 
 class SentinelDashboard:
+    """
+    Real-time Slack dashboard for monitoring Security Sentinel remediation runs.
+    
+    This class manages a live-updating Slack message that displays the status
+    of all remediation batches being processed. It uses Slack's Block Kit for
+    rich formatting and supports both active swarm monitoring and final summary
+    reports.
+    
+    The dashboard is thread-safe and can be updated from multiple worker threads
+    simultaneously. When Slack credentials are not available, it falls back to
+    terminal output.
+    
+    Attributes:
+        lock: Threading lock for thread-safe updates.
+        msg_ts: Slack message timestamp for updating existing messages.
+        start_time: Unix timestamp when the dashboard was created.
+        batch_info: Dictionary mapping batch names to their BatchInfo objects.
+        enabled: Whether Slack integration is active.
+        client: Slack WebClient instance (only when enabled).
+        channel: Target Slack channel ID.
+    """
+    
     def __init__(self, batch_names: list[str], channel_id: str | None = None):
+        """
+        Initialize the Slack dashboard with batch tracking.
+        
+        Sets up the dashboard to track the specified batches and attempts to
+        connect to Slack. If Slack credentials are missing or connection fails,
+        the dashboard falls back to terminal output mode.
+        
+        Args:
+            batch_names: List of batch identifiers to track (e.g., rule IDs).
+            channel_id: Optional Slack channel ID. If not provided, uses
+                       SLACK_CHANNEL_ID environment variable.
+        """
         self.lock = threading.Lock()
         self.msg_ts: str | None = None
         self.start_time = time.time()
@@ -32,7 +101,6 @@ class SentinelDashboard:
             name: BatchInfo(status="In Queue") for name in batch_names
         }
         
-        # 1. Credential Detection
         token = os.getenv("SLACK_BOT_TOKEN")
         self.channel = channel_id or os.getenv("SLACK_CHANNEL_ID")
         
@@ -41,22 +109,28 @@ class SentinelDashboard:
             self.enabled = False
             return
 
-        # 2. Client Initialization
         try:
             self.client = WebClient(token=token)
             self.enabled = True
             self._ensure_access()
         except Exception as e:
-            print(f"⚠️ Slack Initialization failed: {e}")
+            print(f"Slack Initialization failed: {e}")
             self.enabled = False
 
-    def _ensure_access(self):
-        """Attempts to join the channel to ensure posting permissions."""
-        if not self.enabled: return
+    def _ensure_access(self) -> None:
+        """
+        Attempt to join the Slack channel to ensure posting permissions.
+        
+        This method tries to join the configured channel. If the bot is already
+        a member or the channel is public, this succeeds silently. Warnings are
+        printed for permission issues but don't disable the dashboard.
+        """
+        if not self.enabled:
+            return
         try:
             self.client.conversations_join(channel=self.channel)
         except SlackApiError as e:
-            print(f"⚠️ Slack join warning: {e.response['error']}")
+            print(f"Slack join warning: {e.response['error']}")
 
     def update(
         self,
@@ -95,7 +169,15 @@ class SentinelDashboard:
             self._render_active_swarm()
 
     def _format_status_with_emoji(self, status: str) -> str:
-        """Map status keywords to emojis for visual polish."""
+        """
+        Map status keywords to emojis for visual polish in Slack messages.
+        
+        Args:
+            status: Raw status text to format.
+            
+        Returns:
+            Status text prefixed with an appropriate emoji based on keywords.
+        """
         if "Started" in status:
             return f"🚀 {status}"
         elif "Analyzing" in status:
@@ -107,7 +189,13 @@ class SentinelDashboard:
         return status
 
     def _render_active_swarm(self) -> None:
-        """Constructs the JSON Block Kit structure for active runs."""
+        """
+        Construct and transmit the Slack Block Kit structure for active runs.
+        
+        Builds a rich message showing all batches and their current status,
+        with links to Devin sessions or PRs where available. This method is
+        called after each status update to refresh the Slack message.
+        """
         blocks = [
             {
                 "type": "header", 
@@ -357,7 +445,15 @@ class SentinelDashboard:
             self._transmit(blocks)
 
     def _print_terminal_summary(self, results: "list[SessionResult]") -> None:
-        """Print summary to terminal (mirrors print_summary from DO_reporting)."""
+        """
+        Print a formatted summary to the terminal.
+        
+        This method mirrors the functionality of print_summary from DO_reporting,
+        providing a consistent summary format regardless of whether Slack is enabled.
+        
+        Args:
+            results: List of SessionResult objects from the orchestrator run.
+        """
         from scripts.devin.DO_models import SessionStatus
         
         total = len(results)
@@ -407,8 +503,17 @@ class SentinelDashboard:
         
         print("\n" + "=" * 60)
 
-    def _transmit(self, blocks):
-        """Handles the actual Slack API calls for post/update."""
+    def _transmit(self, blocks: list) -> None:
+        """
+        Handle the actual Slack API calls for posting or updating messages.
+        
+        Posts a new message if this is the first transmission, or updates the
+        existing message using the stored timestamp. Disables the dashboard
+        on API errors to prevent log spam.
+        
+        Args:
+            blocks: List of Slack Block Kit block objects to send.
+        """
         try:
             if not self.msg_ts:
                 response = self.client.chat_postMessage(channel=self.channel, blocks=blocks)
