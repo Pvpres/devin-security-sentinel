@@ -17,10 +17,13 @@ def write_github_output(name: str, value: str) -> None:
 
 def main():
     if len(sys.argv) < 3:
-        print("Usage: python devin_orchestrator.py <owner> <repo> [<branch>]")
+        print("Usage: python main.py <owner> <repo> [<branch>]")
         print("\nThis script requires the following environment variables:")
         print("  GH_TOKEN - GitHub Personal Access Token")
         print("  DEVIN_API_KEY - Devin AI API Key")
+        print("\nOptional environment variables for Slack integration:")
+        print("  SLACK_BOT_TOKEN - Slack Bot OAuth Token")
+        print("  SLACK_CHANNEL_ID - Slack Channel ID for dashboard updates")
         sys.exit(1)
     
     owner = sys.argv[1] #required
@@ -31,6 +34,8 @@ def main():
 
     GH_TOKEN = os.getenv("GH_TOKEN")
     DEVIN_API_KEY = os.getenv("DEVIN_API_KEY")
+    SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN")
+    SLACK_CHANNEL_ID = os.getenv("SLACK_CHANNEL_ID")
     
     if not GH_TOKEN:
         print("::error::Missing GH_TOKEN environment variable")
@@ -39,6 +44,11 @@ def main():
     if not DEVIN_API_KEY:
         print("::error::Missing DEVIN_API_KEY environment variable")
         sys.exit(1)
+    
+    if SLACK_BOT_TOKEN and SLACK_CHANNEL_ID:
+        print("Slack integration enabled - dashboard updates will be sent to Slack")
+    else:
+        print("Slack integration disabled - using terminal output only")
     
     start = time.time()
     
