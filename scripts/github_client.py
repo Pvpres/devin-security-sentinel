@@ -1,9 +1,28 @@
+"""
+GitHub Code Scanning API Client for Security Sentinel.
+
+This module provides the GitHubClient class for interacting with GitHub's
+Code Scanning API to fetch security alerts and SARIF analysis data. It handles
+authentication, pagination, and multi-language analysis merging.
+
+The client is designed to work with GitHub's code scanning features, which
+analyze repositories for security vulnerabilities using tools like CodeQL.
+
+Environment Variables:
+    GH_TOKEN: GitHub Personal Access Token with 'security_events' read permission.
+              Required for API authentication.
+
+Example:
+    >>> from scripts.github_client import GitHubClient
+    >>> client = GitHubClient('owner', 'repo')
+    >>> alerts = client.get_active_alerts()
+    >>> sarif = client.get_sarif_data()
+"""
+
 import os
 import requests
 
 
-#add functionality in alerts later so user can edit yaml file if thet only want
-#alerts of a certain file, only critical issues, etc
 class GitHubClient:
     def __init__(self, owner: str, repo: str, token: str = None, branch: str = None):
         """

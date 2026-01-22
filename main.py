@@ -1,3 +1,24 @@
+"""
+Main Entry Point for Security Sentinel GitHub Action.
+
+This module serves as the command-line entry point for the Security Sentinel
+system. It orchestrates the complete workflow: fetching alerts, parsing SARIF
+data, creating remediation batches, and dispatching them to Devin AI.
+
+Usage:
+    python main.py <owner> <repo> [<branch>] [<slack_channel_id>]
+
+Environment Variables:
+    GH_TOKEN: GitHub Personal Access Token (required).
+    DEVIN_API_KEY: Devin AI API Key (required).
+    SLACK_BOT_TOKEN: Slack Bot OAuth Token (optional).
+    SLACK_CHANNEL_ID: Slack Channel ID (optional, can also be passed as argument).
+
+Exit Codes:
+    0: Success or no alerts found.
+    1: Missing required environment variables or failed to fetch data.
+"""
+
 from scripts.github_client import GitHubClient
 from scripts.parse_sarif import run_state_aware_parse
 from scripts.devin_orchestrator import run_orchestrator
@@ -7,15 +28,33 @@ import os
 
 
 def write_github_output(name: str, value: str) -> None:
-    """Write output to GitHub Actions output file if running in CI."""
+    """
+    Write an output variable to the GitHub Actions output file.
+    
+    This function appends key-value pairs to the GITHUB_OUTPUT file,
+    making them available to subsequent workflow steps.
+    
+    Args:
+        name: The output variable name.
+        value: The output variable value.
+    """
     github_output = os.getenv("GITHUB_OUTPUT")
     if github_output:
         with open(github_output, "a") as f:
             f.write(f"{name}={value}\n")
 
 
-
-def main():
+def main() -> int:
+    """
+    Main entry point for the Security Sentinel system.
+    
+    Parses command-line arguments, validates environment variables, fetches
+    security alerts and SARIF data, creates remediation batches, and dispatches
+    them to the Devin AI orchestrator.
+    
+    Returns:
+        Exit code (0 for success, 1 for errors).
+    """
     if len(sys.argv) < 3:
         print("Usage: python main.py <owner> <repo> [<branch>] [<slack_channel_id>]")
         print("\nThis script requires the following environment variables:")

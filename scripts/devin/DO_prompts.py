@@ -1,7 +1,17 @@
+"""
+Prompt Generation for Devin AI Security Remediation Tasks.
+
+This module generates XML-formatted prompts optimized for Devin AI workers
+to remediate security vulnerabilities. The prompts include structured task
+descriptions, vulnerability details, and step-by-step instructions.
+
+The XML format is designed for efficient parsing by LLMs while maintaining
+human readability for debugging and review purposes.
+"""
+
 from typing import Any
 
-"""Module for generating high-density prompts for Sub-Devin workers to remediate GitHub code scanning alerts."""
-"""Should be imported and used by the orchestrator script."""
+
 def create_devin_prompt(
     task_description: str,
     batch_data: dict[str, Any],

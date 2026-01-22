@@ -1,10 +1,25 @@
-"""Reporting and summary generation for orchestrator runs."""
+"""
+Reporting and Summary Generation for Security Sentinel.
+
+This module provides functions for generating human-readable summaries of
+orchestrator runs. It displays batch statistics, alert statistics, and
+detailed results for each processed batch.
+"""
 
 from .DO_models import SessionStatus, SessionResult
 
 
 def print_summary(results: list[SessionResult]) -> None:
-    """Print a human-readable summary of the orchestrator run."""
+    """
+    Print a human-readable summary of the orchestrator run.
+    
+    Displays comprehensive statistics including batch counts by status,
+    alert counts (total, fixed, unfixed), and detailed per-batch results
+    with session URLs and PR links where available.
+    
+    Args:
+        results: List of SessionResult objects from the completed run.
+    """
     total = len(results)
     successes = sum(1 for r in results if r.status == SessionStatus.SUCCESS)
     failures = sum(1 for r in results if r.status == SessionStatus.FAILURE)

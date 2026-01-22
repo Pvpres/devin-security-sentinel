@@ -1,3 +1,14 @@
+"""
+Test for GitHub Default Branch Detection.
+
+This script tests the GitHubClient's ability to detect the default branch
+of a repository. This is important for ensuring SARIF data is fetched from
+the correct branch reference.
+
+Environment Variables:
+    GH_TOKEN: GitHub Personal Access Token.
+"""
+
 import sys
 import os
 

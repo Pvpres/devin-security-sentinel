@@ -1,3 +1,13 @@
+"""
+Integration Test for GitHubClient.
+
+This script tests the GitHubClient class against a real GitHub repository.
+It verifies that alerts can be fetched and analysis IDs can be retrieved.
+
+Environment Variables:
+    GH_TOKEN: GitHub Personal Access Token with security_events scope.
+"""
+
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'scripts'))
