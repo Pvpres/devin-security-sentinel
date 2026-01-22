@@ -1,6 +1,10 @@
 name: "Devin Security Sentinel"
 description: "Runs Devin-based remediation on active GitHub security alerts in a given repo"
 
+branding:
+  icon: "shield"
+  color: "blue"
+
 inputs:
   owner:
     description: "Repository owner"
@@ -23,6 +27,17 @@ inputs:
     description: "Devin API key"
     required: true
 
+outputs:
+  alerts_found:
+    description: "Number of active alerts found"
+    value: ${{ steps.run-orchestrator.outputs.alerts_found }}
+  batches_created:
+    description: "Number of remediation batches created"
+    value: ${{ steps.run-orchestrator.outputs.batches_created }}
+  status:
+    description: "Execution status (success, no_alerts, failed)"
+    value: ${{ steps.run-orchestrator.outputs.status }}
+
 runs:
   using: "composite"
   steps:
@@ -31,12 +46,21 @@ runs:
       with:
         python-version: "3.12"
 
+    - name: Cache pip dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
     - name: Install dependencies
       shell: bash
       run: |
         pip install -r "${{ github.action_path }}/requirements.txt"
 
     - name: Run Devin Orchestrator
+      id: run-orchestrator
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github_token }}

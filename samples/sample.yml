@@ -31,7 +31,7 @@ jobs:
 
       # Your action
       - name: Run Devin Security Orchestrator
-        uses: Pvpres/my-security-tool@v1
+        uses: Pvpres/devin-security-sentinel@v1
         with:
           # Required inputs
           owner: ${{ github.repository_owner }}
