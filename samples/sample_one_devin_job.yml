@@ -30,7 +30,7 @@ jobs:
 
       # Your action runs AFTER CodeQL automatically
       - name: Run Devin Security Orchestrator
-        uses: Pvpres/my-security-tool@v1
+        uses: Pvpres/devin-security-sentinel@v1
         with:
           owner: ${{ github.repository_owner }}
           repo: ${{ github.event.repository.name }}

@@ -1,6 +1,7 @@
 name: "Devin Security Sentinel Example"
 description: "For using the Devin Security Sentinel GitHub Action to remediate security alerts
 this is a sample format you can put in your .github/workflows/ directory to run the action"
+pastle this into your already exisiting yml file or create a new one
 
 on:
   workflow_dispatch:
@@ -31,7 +32,7 @@ jobs:
 
       # Your action
       - name: Run Devin Security Orchestrator
-        uses: Pvpres/devin-security-sentinel@v
+        uses: Pvpres/devin-security-sentinel@v1
         with:
           # Required inputs
           owner: ${{ github.repository_owner }}
